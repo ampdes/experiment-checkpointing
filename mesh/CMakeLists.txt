@@ -2,7 +2,7 @@
 
 cmake_minimum_required(VERSION 3.19)
 
-set(PROJECT_NAME demo_datastructures)
+set(PROJECT_NAME mesh_datastructures)
 project(${PROJECT_NAME} LANGUAGES C CXX)
 
 # Set C++20 standard

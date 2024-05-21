@@ -1,0 +1,16 @@
+# python
+
+*.ipynb_checkpoints*
+*__pycache__**
+*.ipynb
+
+# build
+*build*
+
+# ADIOS2 generated data files
+
+*.bp
+
+# vscode
+*vscode
+
