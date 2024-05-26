@@ -1,5 +1,4 @@
 # python
-
 *.ipynb_checkpoints*
 *__pycache__**
 *.ipynb
@@ -8,8 +7,8 @@
 *build*
 
 # ADIOS2 generated data files
-
 *.bp
+*.h5
 
 # vscode
 *vscode
