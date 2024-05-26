@@ -52,6 +52,12 @@ domain.geometry.index_map().size_local
 domain.geometry.index_map().local_range
 
 # %%
+domain.geometry.index_map().ghosts
+
+# %%
+domain.geometry.index_map().owners
+
+# %%
 domain.topology.cell_name()
 
 # %%
@@ -384,11 +390,167 @@ with ipp.Cluster(engines="mpi", n=3, log_level=logging.ERROR) as cluster:
     # We print the output from each engine
     print("".join(query.stdout))
 
-# %% [markdown]
-# ## TODO
-#
-#  - a function to query all data from each process
-#  - write in parallel
+
+# %%
+def print_info(ns=2, mesh_type=1):
+    from mpi4py import MPI
+    import dolfinx
+    import networkx as nx
+    import matplotlib.pyplot as plt
+
+    if mesh_type == 1:
+        domain = dolfinx.mesh.create_unit_square(MPI.COMM_WORLD, ns, ns, dolfinx.mesh.CellType.triangle)
+    elif mesh_type == 2:
+        domain = dolfinx.mesh.create_unit_square(MPI.COMM_WORLD, ns, ns, dolfinx.mesh.CellType.quadrilateral)
+    elif mesh_type == 3:
+        domain = dolfinx.mesh.create_unit_cube(MPI.COMM_WORLD, ns, ns, ns, dolfinx.mesh.CellType.tetrahedron)
+    elif mesh_type == 4:
+        domain = dolfinx.mesh.create_unit_cube(MPI.COMM_WORLD, ns, ns, ns, dolfinx.mesh.CellType.hexahedron)
+
+    print(f"Hello from rank {MPI.COMM_WORLD.rank}/{MPI.COMM_WORLD.size - 1}")
+    name = domain.name
+    dim = domain.geometry.dim
+    geometry = {
+        "input_global_indices" : domain.geometry.input_global_indices,
+        "x" : domain.geometry.x,
+        "dofmap" : domain.geometry.dofmap,
+        "size_global" : domain.geometry.index_map().size_global,
+        "size_local" : domain.geometry.index_map().size_local,
+        "local_range" : domain.geometry.index_map().local_range,
+        "ghosts" : domain.geometry.index_map().ghosts,
+        "owners" : domain.geometry.index_map().owners,
+    }
+    domain.topology.create_connectivity(2,0)
+    domain.topology.create_connectivity(1,0)
+    domain.topology.create_connectivity(2,1)
+    domain.topology.create_connectivity(0,2)
+    
+    topology = {
+        "cell_name" : domain.topology.cell_name(),
+        "cell_type" : domain.topology.cell_type,
+        "entity_types" : domain.topology.entity_types,
+        "orginal_cell_index" : domain.topology.original_cell_index,
+
+        "index_map_0_local_range" : domain.topology.index_map(0).local_range,
+        "index_map_0_ghosts" : domain.topology.index_map(0).ghosts,
+        "index_map_0_owners" : domain.topology.index_map(0).owners,
+        
+        "index_map_1_local_range" : domain.topology.index_map(1).local_range,
+        "index_map_1_ghosts" : domain.topology.index_map(1).ghosts,
+        "index_map_1_owners" : domain.topology.index_map(1).owners,
+        
+        "index_map_2_local_range" : domain.topology.index_map(2).local_range,
+        "index_map_2_ghosts" : domain.topology.index_map(2).ghosts,
+        "index_map_2_owners" : domain.topology.index_map(2).owners,
+
+        "index_maps_0_0_local_range" : domain.topology.index_maps(0)[0].local_range,
+        "index_maps_0_0_size_local" : domain.topology.index_maps(0)[0].size_local,
+        "index_maps_0_0_ghosts" : domain.topology.index_maps(0)[0].ghosts,
+        "index_maps_0_0_owners" : domain.topology.index_maps(0)[0].owners,
+        
+        "index_maps_1_0_local_range" : domain.topology.index_maps(1)[0].local_range,
+        "index_maps_1_0_size_local" : domain.topology.index_maps(1)[0].size_local,
+        "index_maps_1_0_ghosts" : domain.topology.index_maps(1)[0].ghosts,
+        "index_maps_1_0_owners" : domain.topology.index_maps(1)[0].owners,
+        
+        "index_maps_2_0_local_range" : domain.topology.index_maps(2)[0].local_range,
+        "index_maps_2_0_size_local" : domain.topology.index_maps(2)[0].size_local,        
+        "index_maps_2_0_ghosts" : domain.topology.index_maps(2)[0].ghosts,
+        "index_maps_2_0_owners" : domain.topology.index_maps(2)[0].owners,
+
+        "connectivity_2_0" : domain.topology.connectivity(2,0),
+        "connectivity_1_0" : domain.topology.connectivity(1,0),
+        "connectivity_2_1" : domain.topology.connectivity(2,1),
+        "connectivity_0_2" : domain.topology.connectivity(0,2),
+
+        "connectivity_1_0_array" : domain.topology.connectivity(1,0).array,
+        "connectivity_1_0_offsets" : domain.topology.connectivity(1,0).offsets,
+
+    }
+    cn_10 = domain.topology.connectivity(1,0)
+    edges = cn_10.array.reshape(-1,2)
+    nodes = dict(zip(range(len(domain.geometry.input_global_indices)),domain.geometry.input_global_indices))
+
+    G = nx.Graph()
+    G.add_nodes_from(nodes)
+    node_color = geometry["size_local"]*["blue"] + (geometry["size_global"] - geometry["size_local"] - 1)*["red"]
+
+    G.add_edges_from(edges)
+    # Find the local_to_global map of the indices for visualization
+    pos = dict(zip(range(len(domain.geometry.input_global_indices)), domain.geometry.x[:,:-1]))    
+    # pos = dict(zip(domain.geometry.input_global_indices, domain.geometry.x[:,:-1]))    
+    
+    print(f"From rank {MPI.COMM_WORLD.rank}/{MPI.COMM_WORLD.size - 1}: \n\tname:{name}")
+    print(f"From rank {MPI.COMM_WORLD.rank}/{MPI.COMM_WORLD.size - 1}: \n\tdim:{dim}")
+    for key, value in geometry.items():
+        print(f"From rank {MPI.COMM_WORLD.rank}/{MPI.COMM_WORLD.size - 1}: \n\t{key}:{value}")
+
+    for key, value in topology.items():
+        print(f"From rank {MPI.COMM_WORLD.rank}/{MPI.COMM_WORLD.size - 1}: \n\t{key}:{value}")
+
+    # print(pos)
+    sub1 = plt.subplot(121)
+    sub1.set_title("Local node numbering")
+    if MPI.COMM_WORLD.size < 3:
+        nx.draw(G, pos=pos, with_labels=True, node_color=node_color)
+    else:
+        nx.draw(G, pos=pos, with_labels=True)
+
+    sub2 = plt.subplot(122)
+    sub2.set_title("Global node numbering")
+    if MPI.COMM_WORLD.size < 3:
+        nx.draw(G, pos=pos, labels=nodes, with_labels=True, node_color=node_color)
+    else:
+        nx.draw(G, pos=pos, labels=nodes, with_labels=True)
+
+    return plt.gca()
+    # plt.show()
+
+
+
+# %%
+ns = 2
+mesh_type = 1
+with ipp.Cluster(engines="mpi", n=2, log_level=logging.ERROR) as cluster:
+    # Create a mesh and print info
+    query = cluster[:].apply_async(print_info, ns, mesh_type)
+    query.wait()
+    assert query.successful(), query.error
+    print("".join(query.stdout))
+
+
+# %%
+ns = 3
+mesh_type = 1
+with ipp.Cluster(engines="mpi", n=3, log_level=logging.ERROR) as cluster:
+    # Create a mesh and print info
+    query = cluster[:].apply_async(print_info, ns, mesh_type)
+    query.wait()
+    assert query.successful(), query.error
+    print("".join(query.stdout))
+
+
+# %%
+ns = 4
+mesh_type = 2
+with ipp.Cluster(engines="mpi", n=2, log_level=logging.ERROR) as cluster:
+    # Create a mesh and print info
+    query = cluster[:].apply_async(print_info, ns, mesh_type)
+    query.wait()
+    assert query.successful(), query.error
+    print("".join(query.stdout))
+
+
+# %%
+ns = 3
+mesh_type = 4
+with ipp.Cluster(engines="mpi", n=2, log_level=logging.ERROR) as cluster:
+    # Create a mesh and print info
+    query = cluster[:].apply_async(print_info, ns, mesh_type)
+    query.wait()
+    assert query.successful(), query.error
+    print("".join(query.stdout))
+
 
 # %% [markdown]
 # END
