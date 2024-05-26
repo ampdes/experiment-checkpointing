@@ -26,6 +26,9 @@ import numpy as np
 import h5py
 import networkx as nx
 
+from mpl_toolkits.mplot3d import Axes3D
+import matplotlib.pyplot as plt
+
 # %%
 comm = MPI.COMM_WORLD
 domain = dolfinx.mesh.create_unit_square(comm, 2, 2,)
@@ -395,8 +398,11 @@ with ipp.Cluster(engines="mpi", n=3, log_level=logging.ERROR) as cluster:
 def print_info(ns=2, mesh_type=1):
     from mpi4py import MPI
     import dolfinx
+    import numpy as np
     import networkx as nx
     import matplotlib.pyplot as plt
+    from mpl_toolkits.mplot3d import Axes3D
+
 
     if mesh_type == 1:
         domain = dolfinx.mesh.create_unit_square(MPI.COMM_WORLD, ns, ns, dolfinx.mesh.CellType.triangle)
@@ -469,17 +475,21 @@ def print_info(ns=2, mesh_type=1):
     }
     cn_10 = domain.topology.connectivity(1,0)
     edges = cn_10.array.reshape(-1,2)
-    nodes = dict(zip(range(len(domain.geometry.input_global_indices)),domain.geometry.input_global_indices))
+    local_indices = range(len(domain.geometry.input_global_indices))
+    global_indices = np.array(domain.geometry.input_global_indices)
+    nodes = dict(zip(local_indices, global_indices))
+
+    # colors = {0:"b", 1:"r", 2:"g", 3:"y", 4:"m", 5:"k"}
+    colors = dict(zip(range(10), ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+                                  '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']))
+
+    color = colors[MPI.COMM_WORLD.rank]
+    node_color = geometry["size_local"]*[color] + list(map(colors.get, geometry["owners"]))
 
     G = nx.Graph()
-    G.add_nodes_from(nodes)
-    node_color = geometry["size_local"]*["blue"] + (geometry["size_global"] - geometry["size_local"] - 1)*["red"]
-
+    G.add_nodes_from(local_indices)
     G.add_edges_from(edges)
-    # Find the local_to_global map of the indices for visualization
-    pos = dict(zip(range(len(domain.geometry.input_global_indices)), domain.geometry.x[:,:-1]))    
-    # pos = dict(zip(domain.geometry.input_global_indices, domain.geometry.x[:,:-1]))    
-    
+
     print(f"From rank {MPI.COMM_WORLD.rank}/{MPI.COMM_WORLD.size - 1}: \n\tname:{name}")
     print(f"From rank {MPI.COMM_WORLD.rank}/{MPI.COMM_WORLD.size - 1}: \n\tdim:{dim}")
     for key, value in geometry.items():
@@ -488,30 +498,65 @@ def print_info(ns=2, mesh_type=1):
     for key, value in topology.items():
         print(f"From rank {MPI.COMM_WORLD.rank}/{MPI.COMM_WORLD.size - 1}: \n\t{key}:{value}")
 
-    # print(pos)
-    sub1 = plt.subplot(121)
-    sub1.set_title("Local node numbering")
-    if MPI.COMM_WORLD.size < 3:
-        nx.draw(G, pos=pos, with_labels=True, node_color=node_color)
-    else:
-        nx.draw(G, pos=pos, with_labels=True)
+    # Visualization
+    if mesh_type == 1 or mesh_type == 2:
+        pos = dict(zip(local_indices, domain.geometry.x[:,:-1]))
 
-    sub2 = plt.subplot(122)
-    sub2.set_title("Global node numbering")
-    if MPI.COMM_WORLD.size < 3:
-        nx.draw(G, pos=pos, labels=nodes, with_labels=True, node_color=node_color)
-    else:
-        nx.draw(G, pos=pos, labels=nodes, with_labels=True)
+        sub1 = plt.subplot(121)
+        sub1.set_title(f"Rank {MPI.COMM_WORLD.rank} : Local node numbering")
+        nx.draw(G, pos=pos, with_labels=True, node_color=node_color, font_color="w")
 
-    return plt.gca()
-    # plt.show()
+        sub2 = plt.subplot(122)
+        sub2.set_title(f"Rank {MPI.COMM_WORLD.rank} : Global node numbering")
+        nx.draw(G, pos=pos, labels=nodes, with_labels=True, node_color=node_color, font_color="w")
+
+        return plt.gca()
+
+    if mesh_type == 3 or mesh_type == 4:
+        pos = dict(zip(local_indices, domain.geometry.x))
+        node_xyz = np.array([pos[v] for v in sorted(G)])
+        edge_xyz = np.array([(pos[u], pos[v]) for u, v in G.edges()])
+
+        def plot_3D(ax, labels, node_color):
+            colors = iter(node_color)
+
+            # Plot the nodes - alpha is scaled by "depth" automatically
+            ax.scatter(*node_xyz.T, s=400, ec="w", color=next(colors))
+
+            for i, txt in enumerate(labels):
+                ax.text(*node_xyz[i], txt)
+
+            # Plot the edges
+            for vizedge in edge_xyz:
+                ax.plot(*vizedge.T, color="tab:gray", alpha=0.1)
+
+            for dim in (ax.xaxis, ax.yaxis, ax.zaxis):
+                dim.set_ticks([])
+            # Set axes labels
+            ax.set_xlabel("x")
+            ax.set_ylabel("y")
+            ax.set_zlabel("z")
+
+            return ax
+
+        fig = plt.figure(figsize=(16,16))
+        sub1 = plt.subplot(121, projection="3d")
+        sub1.set_title(f"Rank {MPI.COMM_WORLD.rank} : Local node numbering")
+        sub1 = plot_3D(sub1, local_indices, node_color)
+
+        sub2 = plt.subplot(122, projection="3d")
+        sub2.set_title(f"Rank {MPI.COMM_WORLD.rank} : Global node numbering")
+        sub2 = plot_3D(sub2, global_indices, node_color)
+
+        return plt.gca()
 
 
 
 # %%
 ns = 2
 mesh_type = 1
-with ipp.Cluster(engines="mpi", n=2, log_level=logging.ERROR) as cluster:
+n = 2
+with ipp.Cluster(engines="mpi", n=n, log_level=logging.ERROR) as cluster:
     # Create a mesh and print info
     query = cluster[:].apply_async(print_info, ns, mesh_type)
     query.wait()
@@ -522,7 +567,32 @@ with ipp.Cluster(engines="mpi", n=2, log_level=logging.ERROR) as cluster:
 # %%
 ns = 3
 mesh_type = 1
-with ipp.Cluster(engines="mpi", n=3, log_level=logging.ERROR) as cluster:
+n = 3
+with ipp.Cluster(engines="mpi", n=n, log_level=logging.ERROR) as cluster:
+    # Create a mesh and print info
+    query = cluster[:].apply_async(print_info, ns, mesh_type)
+    query.wait()
+    assert query.successful(), query.error
+    print("".join(query.stdout))
+
+
+# %%
+ns = 4
+mesh_type = 1
+n = 2
+with ipp.Cluster(engines="mpi", n=n, log_level=logging.ERROR) as cluster:
+    # Create a mesh and print info
+    query = cluster[:].apply_async(print_info, ns, mesh_type)
+    query.wait()
+    assert query.successful(), query.error
+    print("".join(query.stdout))
+
+
+# %%
+ns = 4
+mesh_type = 1
+n = 4
+with ipp.Cluster(engines="mpi", n=n, log_level=logging.ERROR) as cluster:
     # Create a mesh and print info
     query = cluster[:].apply_async(print_info, ns, mesh_type)
     query.wait()
@@ -533,7 +603,20 @@ with ipp.Cluster(engines="mpi", n=3, log_level=logging.ERROR) as cluster:
 # %%
 ns = 4
 mesh_type = 2
-with ipp.Cluster(engines="mpi", n=2, log_level=logging.ERROR) as cluster:
+n = 2
+with ipp.Cluster(engines="mpi", n=n, log_level=logging.ERROR) as cluster:
+    # Create a mesh and print info
+    query = cluster[:].apply_async(print_info, ns, mesh_type)
+    query.wait()
+    assert query.successful(), query.error
+    print("".join(query.stdout))
+
+
+# %%
+ns = 4
+mesh_type = 2
+n = 3
+with ipp.Cluster(engines="mpi", n=n, log_level=logging.ERROR) as cluster:
     # Create a mesh and print info
     query = cluster[:].apply_async(print_info, ns, mesh_type)
     query.wait()
@@ -544,7 +627,8 @@ with ipp.Cluster(engines="mpi", n=2, log_level=logging.ERROR) as cluster:
 # %%
 ns = 3
 mesh_type = 4
-with ipp.Cluster(engines="mpi", n=2, log_level=logging.ERROR) as cluster:
+n = 2
+with ipp.Cluster(engines="mpi", n=n, log_level=logging.ERROR) as cluster:
     # Create a mesh and print info
     query = cluster[:].apply_async(print_info, ns, mesh_type)
     query.wait()
