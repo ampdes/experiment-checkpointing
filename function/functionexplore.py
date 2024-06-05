@@ -14,7 +14,7 @@
 # ---
 
 # %% [markdown]
-# # Mesh
+# # FunctionSpace and Function
 
 # %%
 from pathlib import Path
@@ -22,6 +22,7 @@ from mpi4py import MPI
 import adios2.bindings
 import dolfinx
 import numpy as np
+import basix
 
 import pyvista
 import h5py
@@ -34,141 +35,396 @@ import matplotlib.pyplot as plt
 comm = MPI.COMM_WORLD
 domain = dolfinx.mesh.create_unit_square(comm, 2, 2,)
 
-# %%
-pyvista.start_xvfb()
-
-tdim = domain.topology.dim
-num_cells_local = domain.topology.index_map(tdim).size_local
-domain.topology.create_connectivity(tdim, tdim)
-topology, cell_types, geometry = dolfinx.plot.vtk_mesh(domain, tdim, np.arange(num_cells_local, dtype=np.int32))
-
-p = pyvista.Plotter(window_size=[800, 800])
-grid = pyvista.UnstructuredGrid(topology, cell_types, geometry)
-# topology, cell_types, geometry = dolfinx.plot.vtk_mesh(domain, domain.topology.dim)
-# grid = pyvista.Unstructured(topology, cell_types, geometry)
-
-plotter = pyvista.Plotter()
-plotter.add_mesh(grid, show_edges=True)
-# plotter.view_xy()
-plotter.show()
+# %% [markdown]
+# ## Scalar function
 
 # %%
-domain.name
+el = basix.ufl.element(
+    "Lagrange",
+    domain.ufl_cell().cellname(),
+    1,
+    basix.LagrangeVariant.gll_warped,
+    shape=(domain.geometry.dim-1,),
+    dtype=domain.geometry.x.dtype,
+)
 
 # %%
-domain.geometry.dim
+V = dolfinx.fem.functionspace(domain, el)
 
 # %%
-domain.geometry.input_global_indices
+V
 
 # %%
-domain.geometry.x
+V.mesh
+
+# %% [raw]
+# V.dofmap()
+
+# %%
+V.dofmap.index_map_bs
+
+# %%
+V.dofmap.bs
+
+# %%
+V.dofmap.list
 
 # %%
 domain.geometry.dofmap
 
 # %%
-domain.geometry.index_map().size_local
+V.dofmap.index_map.owners
 
 # %%
-domain.geometry.index_map().local_range
+V.dofmap.index_map.ghosts
 
 # %%
-domain.geometry.index_map().ghosts
+V.dofmap.index_map.local_range
 
 # %%
-domain.geometry.index_map().owners
+V.dofmap.dof_layout.num_entity_dofs(0)
 
 # %%
-domain.topology.cell_name()
+V.dofmap.dof_layout.num_entity_dofs(1)
 
 # %%
-domain.topology.cell_type
+V.dofmap.dof_layout.num_entity_dofs(2)
 
 # %%
-domain.topology.entity_types
+V.dofmap.dof_layout.num_entity_dofs(3)
 
 # %%
-domain.topology.original_cell_index
+V.dofmap.dof_layout.num_entity_closure_dofs(0)
 
 # %%
-domain.topology.index_maps(0)
+V.dofmap.dof_layout.num_entity_closure_dofs(1)
 
 # %%
-domain.topology.index_maps(0)[0].local_range
+V.dofmap.dof_layout.num_entity_closure_dofs(2)
 
 # %%
-domain.topology.index_maps(1)
+V.dofmap.dof_layout.num_entity_closure_dofs(3)
+
+# %%
+V.dofmap.dof_layout.entity_dofs(0,0)
+
+# %%
+V.dofmap.dof_layout.entity_dofs(0,1)
+
+# %%
+V.dofmap.dof_layout.entity_dofs(0,2)
+
+# %%
+V.dofmap.dof_layout.entity_dofs(1,0)
+
+# %%
+V.dofmap.dof_layout.entity_dofs(1,1)
+
+# %%
+V.dofmap.dof_layout.entity_dofs(1,2)
+
+# %%
+V.dofmap.dof_layout.entity_dofs(2,0)
+
+# %%
+V.dofmap.dof_layout.num_dofs
+
+# %%
+V.dofmap.index_map.ghosts
+
+# %%
+V.element
+
+# %%
+V.label
+
+# %%
+V.num_sub_spaces
+
+# %%
+V.value_shape
+
+# %%
+V.value_size
+
+# %%
+V.tabulate_dof_coordinates()
+
+# %%
+domain.geometry.x
+
+# %%
+V.tabulate_dof_coordinates().shape
+
+# %%
+el.block_size
+
+# %%
+u = dolfinx.fem.Function(V)
+
+# %%
+u.x.array
+
+# %%
+u.x.block_size
+
+# %%
+u.x.index_map.ghosts
+
+# %%
+u.x.index_map.local_to_global(np.array([1,2,3,4,5], dtype=np.int32))
+
+
+# %%
+class u_expression():
+    def eval(self, x):
+        return x[0]**2 + x[1]**2
+
+u_e = u_expression()
+
+# %%
+u.interpolate(u_e.eval)
+
+# %%
+u.x.array
+
+# %%
+u.x.array.shape
+
+# %%
+u.x.index_map.size_local
+
+# %%
+u.x.index_map.local_range
+
+# %%
+u.x.index_map.ghosts
+
+# %%
+u.x.index_map.owners
+
+# %%
+u.x.petsc_vec.view()
+
+# %%
+pyvista.start_xvfb()
+topology, cell_types, geometry = dolfinx.plot.vtk_mesh(V)
+values = np.zeros((geometry.shape[0], 3), dtype=np.float64)
+values[:, :len(u)] = u.x.array.real.reshape((geometry.shape[0], len(u)))
+
+# Create a point cloud of glyphs
+function_grid = pyvista.UnstructuredGrid(topology, cell_types, geometry)
+function_grid["u"] = values
+# glyphs = function_grid.glyph(orient="u", factor=0.01)
+
+# Create a pyvista-grid for the mesh
+domain.topology.create_connectivity(domain.topology.dim, domain.topology.dim)
+grid = pyvista.UnstructuredGrid(*dolfinx.plot.vtk_mesh(domain, domain.topology.dim))
+
+# Create plotter
+plotter = pyvista.Plotter()
+plotter.add_mesh(grid, style="wireframe", color="k")
+plotter.add_mesh(function_grid)
+plotter.view_xy()
+plotter.show()
+
+
+# %% [markdown]
+# ## Vector function
+
+# %%
+el = basix.ufl.element(
+    "Lagrange",
+    domain.ufl_cell().cellname(),
+    1,
+    basix.LagrangeVariant.gll_warped,
+    shape=(domain.geometry.dim,),
+    dtype=domain.geometry.x.dtype,
+)
+
+# %%
+V = dolfinx.fem.functionspace(domain, el)
+
+# %%
+V
+
+# %%
+V.mesh
 
 # %% [raw]
-# domain.topology.index_maps(1)[0].local_range
+# V.dofmap()
 
 # %%
-domain.topology.index_maps(2)
+V.dofmap.index_map_bs
 
 # %%
-domain.topology.index_maps(2)[0].local_range
+V.dofmap.bs
 
 # %%
-domain.topology.index_maps(2)[0].size_local
+V.dofmap.list
 
 # %%
-domain.topology.index_map(0)
+domain.geometry.dofmap
 
 # %%
-domain.topology.index_map(0).local_range
+V.dofmap.index_map.owners
 
 # %%
-domain.topology.index_map(1)
+V.dofmap.index_map.ghosts
 
 # %%
-domain.topology.index_map(2)
+V.dofmap.index_map.local_range
 
 # %%
-domain.topology.index_map(2).local_range
+V.dofmap.dof_layout.num_entity_dofs(0)
 
 # %%
-domain.topology.connectivity(2,0)
+V.dofmap.dof_layout.num_entity_dofs(1)
 
 # %%
-domain.topology.connectivity(0,2)
+V.dofmap.dof_layout.num_entity_dofs(2)
 
 # %%
-domain.topology.create_connectivity(0,2)
+V.dofmap.dof_layout.num_entity_dofs(3)
 
 # %%
-domain.topology.connectivity(1,0)
+V.dofmap.dof_layout.num_entity_closure_dofs(0)
 
 # %%
-domain.topology.connectivity(2,1)
+V.dofmap.dof_layout.num_entity_closure_dofs(1)
 
 # %%
-domain.topology.connectivity(1,0)
+V.dofmap.dof_layout.num_entity_closure_dofs(2)
 
 # %%
-domain.topology.create_connectivity(2,0)
+V.dofmap.dof_layout.num_entity_closure_dofs(3)
 
 # %%
-domain.topology.create_connectivity(1,0)
+V.dofmap.dof_layout.entity_dofs(0,0)
 
 # %%
-domain.topology.create_connectivity(2,1)
+V.dofmap.dof_layout.entity_dofs(0,1)
 
 # %%
-domain.topology.connectivity(2,0)
+V.dofmap.dof_layout.entity_dofs(0,2)
 
 # %%
-domain.topology.connectivity(2,1)
+V.dofmap.dof_layout.entity_dofs(1,0)
 
 # %%
-cn_10 = domain.topology.connectivity(1,0)
-cn_10
+V.dofmap.dof_layout.entity_dofs(1,1)
 
 # %%
-cn_10.array
+V.dofmap.dof_layout.entity_dofs(1,2)
 
 # %%
-cn_10.offsets
+V.dofmap.dof_layout.entity_dofs(2,0)
+
+# %%
+V.dofmap.dof_layout.num_dofs
+
+# %%
+V.dofmap.index_map.ghosts
+
+# %%
+V.element
+
+# %%
+V.label
+
+# %%
+V.num_sub_spaces
+
+# %%
+V.value_shape
+
+# %%
+V.value_size
+
+# %%
+V.tabulate_dof_coordinates()
+
+# %%
+domain.geometry.x
+
+# %%
+V.tabulate_dof_coordinates().shape
+
+# %%
+el.block_size
+
+# %%
+u = dolfinx.fem.Function(V)
+
+# %%
+u.x.array
+
+# %%
+u.x.block_size
+
+# %%
+u.x.index_map.ghosts
+
+# %%
+u.x.index_map.local_to_global(np.array([1,2,3,4,5], dtype=np.int32))
+
+
+# %%
+class u_expression():
+    def eval(self, x):
+        return (x[0]**2 + x[1]**2,
+               10.0*(x[0]**2 + x[1]**2))
+u_e = u_expression()
+
+# %%
+u.interpolate(u_e.eval)
+
+# %%
+u.x.array
+
+# %%
+u.x.array.shape
+
+# %%
+u.x.index_map.size_local
+
+# %%
+u.x.index_map.local_range
+
+# %%
+u.x.index_map.ghosts
+
+# %%
+u.x.index_map.owners
+
+# %%
+u.x.petsc_vec.view()
+
+# %%
+pyvista.start_xvfb()
+topology, cell_types, geometry = dolfinx.plot.vtk_mesh(V)
+values = np.zeros((geometry.shape[0], 3), dtype=np.float64)
+values[:, :len(u)] = u.x.array.real.reshape((geometry.shape[0], len(u)))
+
+# Create a point cloud of glyphs
+function_grid = pyvista.UnstructuredGrid(topology, cell_types, geometry)
+function_grid["u"] = values
+glyphs = function_grid.glyph(orient="u", factor=0.01)
+
+# Create a pyvista-grid for the mesh
+domain.topology.create_connectivity(domain.topology.dim, domain.topology.dim)
+grid = pyvista.UnstructuredGrid(*dolfinx.plot.vtk_mesh(domain, domain.topology.dim))
+
+# Create plotter
+plotter = pyvista.Plotter()
+plotter.add_mesh(grid, style="wireframe", color="k")
+plotter.add_mesh(glyphs)
+plotter.view_xy()
+plotter.show()
+
+
+# %% [markdown]
+# ## Plot as graphs
 
 # %%
 domain.topology.create_entities(1)
@@ -182,19 +438,12 @@ local_indices = range(len(domain.geometry.input_global_indices))
 global_indices = np.array(domain.geometry.input_global_indices)
 nodes = dict(zip(local_indices, global_indices))
 
-
+pos = dict(zip(local_indices, domain.geometry.x[:,:-1]))
 
 # %%
 G = nx.Graph()
 G.add_nodes_from(nodes)
 G.add_edges_from(edges)
-
-# %%
-nx.draw(G, with_labels=True)
-
-# %%
-pos = dict(zip(local_indices, domain.geometry.x[:,:-1]))
-pos
 
 # %%
 nx.draw(G, with_labels=True, pos=pos)
@@ -203,37 +452,53 @@ nx.draw(G, with_labels=True, pos=pos)
 nx.draw(G, pos=pos, labels=nodes, with_labels=True, font_color="w")
 
 # %%
-domain.geometry.index_map().local_range
+nodes
 
 # %%
-cn_10.links(0)
+vec = u.x.array.reshape(-1,2)
+vec
 
 # %%
-cn_10.links(9)
+vec = np.around(vec, 2)
+vec
 
 # %%
-cn_10.num_nodes
+vec = vec.tolist()
+vec
 
 # %%
-domain.basix_cell()
+tuple(zip(global_indices, vec))
 
 # %%
-domain.ufl_cell()
+labels_global = dict(zip(local_indices, tuple(zip(global_indices, vec))))
+labels_global
 
 # %%
-domain.ufl_domain()
+nx.draw(G, pos=pos, labels=labels_global, with_labels=True, node_size=2000) #, font_color="w"
 
 # %%
-domain.geometry.cmap.degree
+labels_local = dict(zip(local_indices, tuple(zip(local_indices, vec))))
+labels_local
 
 # %%
-domain.geometry.cmap.dim
+nx.draw(G, pos=pos, labels=labels_local, with_labels=True, node_size=2000) #, font_color="w"
 
 # %%
-domain.geometry.cmap.dtype
+fig, ax = plt.subplots(figsize=(15,15))
+margin=0.33
+fig.subplots_adjust(margin, margin, 1.-margin, 1.-margin)
+ax.axis('equal')
 
-# %%
-domain.geometry.cmap.variant
+nx.draw(G,pos=pos,with_labels=False, ax=ax)
+nx.draw_networkx_nodes(G, pos=pos, node_shape='s')
+description = nx.draw_networkx_labels(G,pos,labels=labels_global, horizontalalignment='left')
+
+
+for i, (node, t) in enumerate(description.items()):
+    t.set_position(pos[i])
+    t.set_clip_on(False)
+
+plt.show()
 
 # %% [markdown]
 # ## Write using ADIOS2
@@ -321,7 +586,6 @@ def print_info(ns=2, mesh_type=1):
     import dolfinx
     import numpy as np
     import networkx as nx
-    import pyvista
     import matplotlib.pyplot as plt
     from mpl_toolkits.mplot3d import Axes3D
 
@@ -395,13 +659,11 @@ def print_info(ns=2, mesh_type=1):
         "connectivity_1_0_offsets" : domain.topology.connectivity(1,0).offsets,
 
     }
+    cn_10 = domain.topology.connectivity(1,0)
+    edges = cn_10.array.reshape(-1,2)
     local_indices = range(len(domain.geometry.input_global_indices))
     global_indices = np.array(domain.geometry.input_global_indices)
     nodes = dict(zip(local_indices, global_indices))
-    domain.topology.create_entities(1)
-    num_edges = domain.topology.index_map(1).size_local + domain.topology.index_map(1).num_ghosts
-    domain.topology.create_connectivity(1,dim)
-    edges =dolfinx.mesh.entities_to_geometry(domain, 1, np.arange(num_edges, dtype=np.int32), False)
 
     # colors = {0:"b", 1:"r", 2:"g", 3:"y", 4:"m", 5:"k"}
     colors = dict(zip(range(10), ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
@@ -442,9 +704,10 @@ def print_info(ns=2, mesh_type=1):
         edge_xyz = np.array([(pos[u], pos[v]) for u, v in G.edges()])
 
         def plot_3D(ax, labels, node_color):
+            colors = iter(node_color)
 
             # Plot the nodes - alpha is scaled by "depth" automatically
-            ax.scatter(*node_xyz.T, s=400, ec="w", color=node_color)
+            ax.scatter(*node_xyz.T, s=400, ec="w", color=next(colors))
 
             for i, txt in enumerate(labels):
                 ax.text(*node_xyz[i], txt)
@@ -551,18 +814,6 @@ with ipp.Cluster(engines="mpi", n=n, log_level=logging.ERROR) as cluster:
 ns = 3
 mesh_type = 4
 n = 2
-with ipp.Cluster(engines="mpi", n=n, log_level=logging.ERROR) as cluster:
-    # Create a mesh and print info
-    query = cluster[:].apply_async(print_info, ns, mesh_type)
-    query.wait()
-    assert query.successful(), query.error
-    print("".join(query.stdout))
-
-
-# %%
-ns = 3
-mesh_type = 4
-n = 3
 with ipp.Cluster(engines="mpi", n=n, log_level=logging.ERROR) as cluster:
     # Create a mesh and print info
     query = cluster[:].apply_async(print_info, ns, mesh_type)
