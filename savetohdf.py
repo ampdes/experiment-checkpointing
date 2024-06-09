@@ -293,4 +293,51 @@ filename = "testvcg2.vtkhdf"
 write_cg(domain, V, u, filename)
 
 # %% [markdown]
+# ## DG spaces
+
+# %%
+
+# %% [markdown]
+# ## Meshtags
+
+# %%
+meshtags = {}
+for i in range(domain.topology.dim + 1):
+    domain.topology.create_entities(i)
+    e_map = domain.topology.index_map(i)
+
+    entities = np.arange(e_map.size_local, dtype=np.int32)
+
+    values = np.arange(e_map.size_local, dtype=np.int32) + e_map.local_range[0]
+    meshtags[i] = dolfinx.mesh.meshtags(domain, i, entities, values)
+
+# %%
+dof_layout = domain.geometry.cmap.create_dof_layout()
+
+connectivity = {}
+for i in range(domain.topology.dim + 1):
+    e_map = domain.topology.index_map(i)
+    domain.topology.create_connectivity(i, domain.topology.dim)
+    entities_to_geometry = dolfinx.mesh.entities_to_geometry(
+        domain, i, meshtags[i].indices, False
+    )
+    
+    connectivity[i] = domain.geometry.index_map().local_to_global(entities_to_geometry.reshape(-1))
+
+# %%
+meshtags[2].values
+
+# %%
+meshtags[2].indices
+
+# %%
+connectivity[2]
+
+# %% [markdown]
+# ## For writing Meshtags do we need PolyData instead of the UnstructuredGrid? 
+#
+# See https://www.kitware.com/how-to-write-time-dependent-data-in-vtkhdf-files/
+#
+
+# %% [markdown]
 # END
