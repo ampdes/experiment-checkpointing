@@ -115,16 +115,19 @@ def write_grid(hdf, domain, dmap, imap, original=True, V=None):
 
     # Geom dofmap offset
     con_part = hdf.create_dataset("NumberOfConnectivityIds", (1,), dtype=np.int64)
+    # con_part[domain.comm.rank] = num_cells_local * num_dofs_per_cell
     if domain.comm.rank == 0:
         con_part[domain.comm.rank] = num_cells_global * num_dofs_per_cell
 
     # Num cells
     num_cells = hdf.create_dataset("NumberOfCells", (1,), dtype=np.int64)
+    # num_cells[domain.comm.rank] = num_cells_local
     if domain.comm.rank == 0:
         num_cells[domain.comm.rank] = num_cells_global
 
     # Num points
     num_points = hdf.create_dataset("NumberOfPoints", (1,), dtype=np.int64)
+    # num_points[domain.comm.rank] = imap.size_local
     if domain.comm.rank == 0:
         num_points[domain.comm.rank] = imap.size_global
 
@@ -190,16 +193,25 @@ write_mesh(domain, filename)
 
 # %%
 class u_scalar:
+    def __init__(self, t=0.0):
+        self.t = t
+
     def eval(self, x):
-        return x[0] ** 2 + x[1] ** 2
+        return 10.0 * np.exp(self.t) * (x[0] ** 2 + x[1] ** 2)
 
 
 u_s = u_scalar()
 
 
 class u_vector:
+    def __init__(self, t=0.0):
+        self.t = t
+
     def eval(self, x):
-        return (x[0] ** 2 + x[1] ** 2, 10.0 * (x[0] ** 2 + x[1] ** 2))
+        return (
+            10.0 * np.exp(self.t) * x[0] ** 2 + x[1] ** 2,
+            10.0 * np.exp(self.t) * 10.0 * (x[0] ** 2 + x[1] ** 2),
+        )
 
 
 u_v = u_vector()
@@ -292,10 +304,94 @@ u.interpolate(u_v.eval)
 filename = "testvcg2.vtkhdf"
 write_cg(domain, V, u, filename)
 
+
 # %% [markdown]
 # ## DG spaces
 
 # %%
+
+# %% [markdown]
+# ## Temporal data
+
+
+# %%
+def write_cg_temporal(domain, V, u, u_e, dt, nt, filename):
+    comm = domain.comm
+    dmap = V.dofmap
+    imap = V.dofmap.index_map
+    with HDF5File(filename, comm) as hdf:
+        write_grid(hdf, domain, dmap, imap, False, V)
+
+        steps = hdf.create_group("Steps")
+        steps.attrs["NSteps"] = 0
+
+        steps.create_dataset("Values", (0,), maxshape=(None,), dtype=np.float64)
+        steps.create_dataset(
+            "PartOffsets", (0,), chunks=True, maxshape=(None,), dtype=np.int64
+        )
+
+        pd_offsets = steps.create_group("PointDataOffsets")
+        pd_offsets.create_dataset(u.name, (0,), maxshape=(None,), dtype=np.int64)
+
+        # Put function
+        u_size_global = u.x.index_map.size_global
+        u_size_local = u.x.index_map.size_local
+        u_range = u.x.index_map.local_range
+
+        bs = u.x.block_size
+
+        func = hdf.create_group("PointData")
+        func_values = func.create_dataset(
+            u.name,
+            shape=(nt * u_size_global, bs),
+            dtype=u.dtype,
+            chunks=True,
+        )
+
+        t = 0.0
+        for step in range(1, nt + 1):
+            t += dt
+            u_e.t = t
+            u.interpolate(u_e.eval)
+
+            steps.attrs["NSteps"] += 1
+            steps["Values"].resize((steps["Values"].shape[0] + 1), axis=0)
+            steps["Values"][-1] = t
+
+            steps["PartOffsets"].resize((steps["PartOffsets"].shape[0] + 1), axis=0)
+            steps["PartOffsets"][-1] = step
+
+            partoffset = func_values.shape[0]
+            # func_values.resize((partoffset + u_size_global, bs))
+
+            func_values[
+                partoffset + u_range[0] : partoffset + u_range[1], :
+            ] = u.x.array[: u_size_local * bs].reshape(-1, bs)
+
+
+# %% [markdown]
+# ## Scalar function CG1
+
+# %%
+el = basix.ufl.element(
+    "Lagrange",
+    domain.ufl_cell().cellname(),
+    1,
+    basix.LagrangeVariant.gll_warped,
+    shape=(domain.geometry.dim - 1,),
+    dtype=domain.geometry.x.dtype,
+)
+
+V = dolfinx.fem.functionspace(domain, el)
+
+u = dolfinx.fem.Function(V)
+u.interpolate(u_s.eval)
+
+# %%
+filename = "testscg1time.vtkhdf"
+dt = 0.1
+nt = 10
+write_cg_temporal(domain, V, u, u_s, dt, nt, filename)
 
 # %% [markdown]
 # ## Meshtags
@@ -321,8 +417,10 @@ for i in range(domain.topology.dim + 1):
     entities_to_geometry = dolfinx.mesh.entities_to_geometry(
         domain, i, meshtags[i].indices, False
     )
-    
-    connectivity[i] = domain.geometry.index_map().local_to_global(entities_to_geometry.reshape(-1))
+
+    connectivity[i] = domain.geometry.index_map().local_to_global(
+        entities_to_geometry.reshape(-1)
+    )
 
 # %%
 meshtags[2].values
@@ -334,7 +432,7 @@ meshtags[2].indices
 connectivity[2]
 
 # %% [markdown]
-# ## For writing Meshtags do we need PolyData instead of the UnstructuredGrid? 
+# ## For writing Meshtags do we need PolyData instead of the UnstructuredGrid?
 #
 # See https://www.kitware.com/how-to-write-time-dependent-data-in-vtkhdf-files/
 #
