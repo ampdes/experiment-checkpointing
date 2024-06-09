@@ -34,25 +34,30 @@ import numpy as np
 
 
 # %%
-def write_mesh(domain, hdf):
+def write_mesh(domain, filename):
 
-    g_imap = domain.geometry.index_map()
-    num_nodes_local = g_imap.size_local
-    geom_range = g_imap.local_range
-    geom = domain.geometry.x[:num_nodes_local].copy()
+    comm = domain.comm
+    inf = h5py.File(filename, "w", driver="mpio", comm=comm)
+    hdf = inf.create_group(np.string_("VTKHDF"))
     
-    dt = h5py.string_dtype(encoding="ascii")
     hdf.attrs["Version"] = [2, 2]
-    hdf.attrs["Type"] = np.string_("UnstructuredGrid")
+    ascii_type = 'UnstructuredGrid'.encode('ascii')
+    hdf.attrs.create('Type', ascii_type, dtype=h5py.string_dtype('ascii', len(ascii_type)))
+
+    dmap = domain.geometry.dofmap
+    imap = domain.geometry.index_map()
     
+    # Local geometry
+    num_nodes_local = imap.size_local
+    local_range = imap.local_range
+    geom = domain.geometry.x[:num_nodes_local].copy()
+
     # Put local geometry
-    global_shape = (g_imap.size_global, 3)
+    global_shape = (imap.size_global, 3)
     geom_set = hdf.create_dataset(np.string_("Points"), global_shape, dtype=geom.dtype)
-    geom_set[geom_range[0]:geom_range[1], :] = geom
+    geom_set[local_range[0]:local_range[1], :] = geom
     
     # Compute global topology
-    g_imap = g_imap
-    g_dmap = domain.geometry.dofmap
     num_cells_local = domain.topology.index_map(domain.topology.dim).size_local
     num_cells_global = domain.topology.index_map(domain.topology.dim).size_global
     cell_range = domain.topology.index_map(domain.topology.dim).local_range
@@ -60,9 +65,9 @@ def write_mesh(domain, hdf):
     geom_layout = cmap.create_dof_layout()
     num_dofs_per_cell = geom_layout.num_entity_closure_dofs(domain.topology.dim)
     dofs_out = np.zeros((num_cells_local, num_dofs_per_cell), dtype=np.int64)
-    assert g_dmap.shape[1] == num_dofs_per_cell
+    assert dmap.shape[1] == num_dofs_per_cell
     dofs_out[:, :] = np.asarray(
-    g_imap.local_to_global(g_dmap[:num_cells_local, :].reshape(-1))
+    imap.local_to_global(dmap[:num_cells_local, :].reshape(-1))
     ).reshape(dofs_out.shape)
     cell_type = domain.topology.cell_type
     map_vtk = np.argsort(dolfinx.cpp.io.perm_vtk(cell_type, num_dofs_per_cell))
@@ -91,37 +96,42 @@ def write_mesh(domain, hdf):
     # num points
     num_points = hdf.create_dataset("NumberOfPoints", (1,), dtype=np.int64)
     if domain.comm.rank == 0:
-       num_points[domain.comm.rank] = g_imap.size_global
+       num_points[domain.comm.rank] = imap.size_global
     
     # Offsets
     offsets = hdf.create_dataset("Offsets", shape=(num_cells_global+1,), dtype=np.int64)
     offsets[cell_range[0] + 1: cell_range[1] + 1] = np.arange(1, num_cells_local+1)*dofs_out.shape[1] + cell_range[0]*dofs_out.shape[1]
 
+    inf.close()
+
+
 
 # %%
-def write_cg(domain, V, u, hdf):
+def write_cg(domain, V, u, filename):
+
+    comm = domain.comm
+    inf = h5py.File(filename, "w", driver="mpio", comm=comm)
+    hdf = inf.create_group(np.string_("VTKHDF"))
 
     hdf.attrs["Version"] = [2, 2]
     ascii_type = 'UnstructuredGrid'.encode('ascii')
     hdf.attrs.create('Type', ascii_type, dtype=h5py.string_dtype('ascii', len(ascii_type)))
 
-    v_dmap = V.dofmap
-    v_imap = V.dofmap.index_map
+    dmap = V.dofmap
+    imap = V.dofmap.index_map
 
     # Local geometry
-    num_nodes_local = v_imap.size_local
-    local_range = v_imap.local_range
+    num_nodes_local = imap.size_local
+    local_range = imap.local_range
     geom = V.tabulate_dof_coordinates()[:num_nodes_local].copy()
 
     # Put local geometry
-    imap = v_imap
     global_shape = (imap.size_global, 3)
     geom_set = hdf.create_dataset(np.string_("Points"), global_shape, dtype=geom.dtype)
     geom_set[local_range[0]:local_range[1], :] = geom
     
     
     # Compute global topology
-    dmap = v_dmap
     num_cells_local = domain.topology.index_map(domain.topology.dim).size_local
     num_cells_global = domain.topology.index_map(domain.topology.dim).size_global
     cell_range = domain.topology.index_map(domain.topology.dim).local_range
@@ -130,7 +140,7 @@ def write_cg(domain, V, u, hdf):
     dofs_out = np.zeros((num_cells_local, num_dofs_per_cell), dtype=np.int64)
     
     dofs_out[:, :] = np.asarray(
-    imap.local_to_global(dmap.list[:num_cells_local, :].reshape(-1))
+        imap.local_to_global(dmap.list[:num_cells_local, :].reshape(-1))
     ).reshape(dofs_out.shape)
     cell_type = domain.topology.cell_type
     map_vtk = np.argsort(dolfinx.cpp.io.perm_vtk(cell_type, num_dofs_per_cell))
@@ -165,7 +175,6 @@ def write_cg(domain, V, u, hdf):
     # Offsets
     offsets = hdf.create_dataset("Offsets", shape=(num_cells_global+1,), dtype=np.int64)
     offsets[cell_range[0] + 1: cell_range[1] + 1] = np.arange(1, num_cells_local+1)*dofs_out.shape[1] + cell_range[0]*dofs_out.shape[1]
-    # inf.close()
     
     # Put function
     u_size_global = u.x.index_map.size_global
@@ -187,6 +196,8 @@ def write_cg(domain, V, u, hdf):
     # u_offsets = func.create_dataset("Offsets", shape=(num_u_nodes+1,), dtype=np.int64)
     # u_offsets[u_range[0] + 1: u_range[1] + 1] = np.arange(1, u_size_local+1)*bs + u_range[0]*bs
 
+    inf.close()
+
 
 # %% [markdown]
 # ## Write mesh
@@ -199,11 +210,8 @@ gdim = domain.geometry.dim
 
 # %%
 filename = Path("test.vtkhdf")
-inf = h5py.File(filename, "w", driver="mpio", comm=comm)
-hdf = inf.create_group(np.string_("VTKHDF"))
 
-write_mesh(domain, hdf)
-inf.close()
+write_mesh(domain, filename)
 
 
 # %% [markdown]
@@ -243,12 +251,7 @@ u.interpolate(u_s.eval)
 
 # %%
 filename = "testscg1.vtkhdf"
-inf = h5py.File(filename, "w", driver="mpio", comm=comm)
-hdf = inf.create_group(np.string_("VTKHDF"))
-
-write_cg(domain, V, u, hdf)
-
-inf.close()
+write_cg(domain, V, u, filename)
 
 # %% [markdown]
 # # Scalar function CG2
@@ -270,12 +273,7 @@ u.interpolate(u_s.eval)
 
 # %%
 filename = "testscg2.vtkhdf"
-inf = h5py.File(filename, "w", driver="mpio", comm=comm)
-hdf = inf.create_group(np.string_("VTKHDF"))
-
-write_cg(domain, V, u, hdf)
-
-inf.close()
+write_cg(domain, V, u, filename)
 
 # %% [markdown]
 # # Vector function CG1
@@ -297,12 +295,7 @@ u.interpolate(u_v.eval)
 
 # %%
 filename = "testvcg1.vtkhdf"
-inf = h5py.File(filename, "w", driver="mpio", comm=comm)
-hdf = inf.create_group(np.string_("VTKHDF"))
-
-write_cg(domain, V, u, hdf)
-
-inf.close()
+write_cg(domain, V, u, filename)
 
 # %% [markdown]
 # # Vector function CG2
@@ -324,12 +317,7 @@ u.interpolate(u_v.eval)
 
 # %%
 filename = "testvcg2.vtkhdf"
-inf = h5py.File(filename, "w", driver="mpio", comm=comm)
-hdf = inf.create_group(np.string_("VTKHDF"))
-
-write_cg(domain, V, u, hdf)
-
-inf.close()
+write_cg(domain, V, u, filename)
 
 # %% [markdown]
 # END
