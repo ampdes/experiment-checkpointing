@@ -148,7 +148,7 @@ def write_mesh(domain, filename):
 
 
 # %%
-def write_cg(domain, V, u, filename):
+def write_cg(domain, V, u, filename, celldata=False):
     comm = domain.comm
     dmap = V.dofmap
     imap = V.dofmap.index_map
@@ -162,7 +162,11 @@ def write_cg(domain, V, u, filename):
 
         bs = u.x.block_size
 
-        func = hdf.create_group("PointData")
+        if celldata:
+            func = hdf.create_group("CellData")
+        else:
+            func = hdf.create_group("PointData")
+
         func_values = func.create_dataset(
             u.name, shape=(u_size_global, bs), dtype=u.dtype
         )
@@ -296,6 +300,67 @@ write_cg(domain, V, u, filename)
 # ## DG spaces
 
 # %%
+el = basix.ufl.element(
+    "DG",
+    domain.ufl_cell().cellname(),
+    0,
+    basix.LagrangeVariant.gll_warped,
+    shape=(domain.geometry.dim - 1,),
+    dtype=domain.geometry.x.dtype,
+)
+
+V = dolfinx.fem.functionspace(domain, el)
+
+u = dolfinx.fem.Function(V)
+u.interpolate(u_s.eval)
+
+# %%
+filename = "testsdg0.vtkhdf"
+write_cg(domain, V, u, filename, celldata=True)
+
+# %% [markdown]
+# ## Scalar function CG1
+
+# %%
+el = basix.ufl.element(
+    "DG",
+    domain.ufl_cell().cellname(),
+    1,
+    basix.LagrangeVariant.gll_warped,
+    shape=(domain.geometry.dim - 1,),
+    dtype=domain.geometry.x.dtype,
+)
+
+V = dolfinx.fem.functionspace(domain, el)
+
+u = dolfinx.fem.Function(V)
+u.interpolate(u_s.eval)
+
+# %%
+filename = "testsdg1.vtkhdf"
+write_cg(domain, V, u, filename)
+
+# %% [markdown]
+# ## Vector function DG2
+
+# %%
+el = basix.ufl.element(
+    "DG",
+    domain.ufl_cell().cellname(),
+    2,
+    basix.LagrangeVariant.gll_warped,
+    shape=(domain.geometry.dim,),
+    dtype=domain.geometry.x.dtype,
+)
+
+V = dolfinx.fem.functionspace(domain, el)
+
+u = dolfinx.fem.Function(V)
+u.interpolate(u_v.eval)
+
+# %%
+filename = "testvdg2.vtkhdf"
+write_cg(domain, V, u, filename)
 
 # %% [markdown]
 # ## Meshtags
