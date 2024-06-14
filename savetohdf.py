@@ -36,24 +36,6 @@ from contextlib import contextmanager
 
 
 # %%
-@contextmanager
-def HDF5File(filename, comm):
-    file = h5py.File(filename, "w", driver="mpio", comm=comm)
-    hdf = file.create_group(np.string_("VTKHDF"))
-
-    hdf.attrs["Version"] = [2, 2]
-    ascii_type = "UnstructuredGrid".encode("ascii")
-    hdf.attrs.create(
-        "Type", ascii_type, dtype=h5py.string_dtype("ascii", len(ascii_type))
-    )
-
-    try:
-        yield hdf
-    finally:
-        file.close()
-
-
-# %%
 def write_grid(hdf, domain, dmap, imap, original=True, V=None):
     # Local geometry
     num_nodes_local = imap.size_local
@@ -138,43 +120,6 @@ def write_grid(hdf, domain, dmap, imap, original=True, V=None):
     )
 
 
-# %%
-def write_mesh(domain, filename):
-    comm = domain.comm
-    dmap = domain.geometry.dofmap
-    imap = domain.geometry.index_map()
-    with HDF5File(filename, comm) as hdf:
-        write_grid(hdf, domain, dmap, imap, True)
-
-
-# %%
-def write_cg(domain, V, u, filename, celldata=False):
-    comm = domain.comm
-    dmap = V.dofmap
-    imap = V.dofmap.index_map
-    with HDF5File(filename, comm) as hdf:
-        write_grid(hdf, domain, dmap, imap, False, V)
-
-        # Put function
-        u_size_global = u.x.index_map.size_global
-        u_size_local = u.x.index_map.size_local
-        u_range = u.x.index_map.local_range
-
-        bs = u.x.block_size
-
-        if celldata:
-            func = hdf.create_group("CellData")
-        else:
-            func = hdf.create_group("PointData")
-
-        func_values = func.create_dataset(
-            u.name, shape=(u_size_global, bs), dtype=u.dtype
-        )
-        func_values[u_range[0] : u_range[1], :] = u.x.array[
-            : u_size_local * bs
-        ].reshape(-1, bs)
-
-
 # %% [markdown]
 # ## Write mesh
 
@@ -182,11 +127,6 @@ def write_cg(domain, V, u, filename, celldata=False):
 comm = MPI.COMM_WORLD
 domain = dolfinx.mesh.create_unit_square(comm, 4, 4)
 gdim = domain.geometry.dim
-
-# %%
-filename = Path("test.vtkhdf")
-write_mesh(domain, filename)
-
 
 # %% [markdown]
 # ## Function expressions
@@ -208,8 +148,53 @@ class u_vector:
 
 u_v = u_vector()
 
-# %% [markdown]
-# ## Scalar function CG1
+# %%
+filename = "testmm.vtkhdf"
+
+# %%
+file = h5py.File(filename, "w", driver="mpio", comm=comm)
+hdf = file.create_group(np.string_("VTKHDF"), track_order=True)
+
+# %%
+# roottype = "MultiBlockDataSet"
+roottype = "PartitionedDataSetCollection"
+
+# %%
+hdf.attrs["Version"] = [2, 2]
+ascii_type = roottype.encode("ascii")
+hdf.attrs.create(
+    "Type", ascii_type, dtype=h5py.string_dtype("ascii", len(ascii_type))
+)
+
+# %%
+# Create the assembly group
+assembly = hdf.create_group('Assembly', track_order=True)
+
+# %%
+geogrid_name = "mesh"
+geogrid = hdf.create_group(geogrid_name)
+geogrid.attrs["Version"] = [2, 2]
+ascii_type = "UnstructuredGrid".encode("ascii")
+geogrid.attrs.create(
+    "Type", ascii_type, dtype=h5py.string_dtype("ascii", len(ascii_type))
+)
+
+
+# %%
+comm = domain.comm
+dmap = domain.geometry.dofmap
+imap = domain.geometry.index_map()
+write_grid(geogrid, domain, dmap, imap, True)
+
+# %%
+fungrid_name = "Function"
+fungrid = hdf.create_group(fungrid_name)
+fungrid.attrs["Version"] = [2, 2]
+ascii_type = "UnstructuredGrid".encode("ascii")
+fungrid.attrs.create(
+    "Type", ascii_type, dtype=h5py.string_dtype("ascii", len(ascii_type))
+)
+
 
 # %%
 el = basix.ufl.element(
@@ -227,182 +212,36 @@ u = dolfinx.fem.Function(V)
 u.interpolate(u_s.eval)
 
 # %%
-filename = "testscg1.vtkhdf"
-write_cg(domain, V, u, filename)
+comm = domain.comm
+dmap = V.dofmap
+imap = V.dofmap.index_map
+write_grid(fungrid, domain, dmap, imap, False, V)
 
-# %% [markdown]
-# ## Scalar function CG2
+# Put function
+u_size_global = u.x.index_map.size_global
+u_size_local = u.x.index_map.size_local
+u_range = u.x.index_map.local_range
 
-# %%
-el = basix.ufl.element(
-    "Lagrange",
-    domain.ufl_cell().cellname(),
-    2,
-    basix.LagrangeVariant.gll_warped,
-    shape=(domain.geometry.dim - 1,),
-    dtype=domain.geometry.x.dtype,
+bs = u.x.block_size
+
+func = fungrid.create_group("PointData")
+
+func_values = func.create_dataset(
+    u.name, shape=(u_size_global, bs), dtype=u.dtype
 )
-
-V = dolfinx.fem.functionspace(domain, el)
-
-u = dolfinx.fem.Function(V)
-u.interpolate(u_s.eval)
+func_values[u_range[0] : u_range[1], :] = u.x.array[
+    : u_size_local * bs
+].reshape(-1, bs)
 
 # %%
-filename = "testscg2.vtkhdf"
-write_cg(domain, V, u, filename)
+assembly["mesh"] = h5py.SoftLink("/VTKHDF/mesh")
+assembly["mesh"].attrs['Index'] = 0
 
-# %% [markdown]
-# ## Vector function CG1
-
-# %%
-el = basix.ufl.element(
-    "Lagrange",
-    domain.ufl_cell().cellname(),
-    1,
-    basix.LagrangeVariant.gll_warped,
-    shape=(domain.geometry.dim,),
-    dtype=domain.geometry.x.dtype,
-)
-
-V = dolfinx.fem.functionspace(domain, el)
-
-u = dolfinx.fem.Function(V)
-u.interpolate(u_v.eval)
+assembly["Function"] = h5py.SoftLink("/VTKHDF/Function")
+assembly["Function"].attrs['Index'] = 1
 
 # %%
-filename = "testvcg1.vtkhdf"
-write_cg(domain, V, u, filename)
-
-# %% [markdown]
-# ## Vector function CG2
-
-# %%
-el = basix.ufl.element(
-    "Lagrange",
-    domain.ufl_cell().cellname(),
-    2,
-    basix.LagrangeVariant.gll_warped,
-    shape=(domain.geometry.dim,),
-    dtype=domain.geometry.x.dtype,
-)
-
-V = dolfinx.fem.functionspace(domain, el)
-
-u = dolfinx.fem.Function(V)
-u.interpolate(u_v.eval)
-
-# %%
-filename = "testvcg2.vtkhdf"
-write_cg(domain, V, u, filename)
-
-# %% [markdown]
-# ## DG spaces
-
-# %%
-el = basix.ufl.element(
-    "DG",
-    domain.ufl_cell().cellname(),
-    0,
-    basix.LagrangeVariant.gll_warped,
-    shape=(domain.geometry.dim - 1,),
-    dtype=domain.geometry.x.dtype,
-)
-
-V = dolfinx.fem.functionspace(domain, el)
-
-u = dolfinx.fem.Function(V)
-u.interpolate(u_s.eval)
-
-# %%
-filename = "testsdg0.vtkhdf"
-write_cg(domain, V, u, filename, celldata=True)
-
-# %% [markdown]
-# ## Scalar function CG1
-
-# %%
-el = basix.ufl.element(
-    "DG",
-    domain.ufl_cell().cellname(),
-    1,
-    basix.LagrangeVariant.gll_warped,
-    shape=(domain.geometry.dim - 1,),
-    dtype=domain.geometry.x.dtype,
-)
-
-V = dolfinx.fem.functionspace(domain, el)
-
-u = dolfinx.fem.Function(V)
-u.interpolate(u_s.eval)
-
-# %%
-filename = "testsdg1.vtkhdf"
-write_cg(domain, V, u, filename)
-
-# %% [markdown]
-# ## Vector function DG2
-
-# %%
-el = basix.ufl.element(
-    "DG",
-    domain.ufl_cell().cellname(),
-    2,
-    basix.LagrangeVariant.gll_warped,
-    shape=(domain.geometry.dim,),
-    dtype=domain.geometry.x.dtype,
-)
-
-V = dolfinx.fem.functionspace(domain, el)
-
-u = dolfinx.fem.Function(V)
-u.interpolate(u_v.eval)
-
-# %%
-filename = "testvdg2.vtkhdf"
-write_cg(domain, V, u, filename)
-
-# %% [markdown]
-# ## Meshtags
-
-# %%
-meshtags = {}
-for i in range(domain.topology.dim + 1):
-    domain.topology.create_entities(i)
-    e_map = domain.topology.index_map(i)
-
-    entities = np.arange(e_map.size_local, dtype=np.int32)
-
-    values = np.arange(e_map.size_local, dtype=np.int32) + e_map.local_range[0]
-    meshtags[i] = dolfinx.mesh.meshtags(domain, i, entities, values)
-
-# %%
-dof_layout = domain.geometry.cmap.create_dof_layout()
-
-connectivity = {}
-for i in range(domain.topology.dim + 1):
-    e_map = domain.topology.index_map(i)
-    domain.topology.create_connectivity(i, domain.topology.dim)
-    entities_to_geometry = dolfinx.mesh.entities_to_geometry(
-        domain, i, meshtags[i].indices, False
-    )
-    
-    connectivity[i] = domain.geometry.index_map().local_to_global(entities_to_geometry.reshape(-1))
-
-# %%
-meshtags[2].values
-
-# %%
-meshtags[2].indices
-
-# %%
-connectivity[2]
-
-# %% [markdown]
-# ## For writing Meshtags do we need PolyData instead of the UnstructuredGrid? 
-#
-# See https://www.kitware.com/how-to-write-time-dependent-data-in-vtkhdf-files/
-#
+file.close()
 
 # %% [markdown]
 # END
