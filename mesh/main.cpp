@@ -50,49 +50,68 @@ int main(int argc, char* argv[])
     const std::string mesh_name = mesh->name;
     const std::int16_t mesh_dim = geometry.dim();
     const std::vector<int64_t> mesh_input_global_indices = geometry.input_global_indices();
-    const std::span<const T> _mesh_x = geometry.x();
+    const std::span<const int64_t> mesh_input_global_indices_span(mesh_input_global_indices.begin(),
+                                                            mesh_input_global_indices.end());
+    const std::span<const T> mesh_x = geometry.x();
 
-    // std::mdspan<const int32_t, 
-    //             std::dextents<std::size_t, 2UL>,
-    //             std::layout_right, std::default_accessor<const int32_t>>
-    //             mesh_dofmaps_x = geometry.dofmap();
+    auto imap = mesh->geometry().index_map();
+    const std::int64_t num_nodes_global = imap->size_global();
+    const std::int32_t num_nodes_local = imap->size_local();
+    const std::int64_t offset = imap->local_range()[0];
 
-    // Perhaps need to expose the currently private attribute
-    // std::vector<std::vector<std::int32_t>> mesh_dofmaps_x = geometry._dofmaps;
+    auto dmap = mesh->geometry().dofmap();
 
-    const std::shared_ptr<const dolfinx::common::IndexMap> index_map_ptr = geometry.index_map();
-    // int size_global = index_map_ptr->size_global();
-    // int size_local = index_map_ptr->size_local();
-
-    std::vector<dolfinx::mesh::CellType> entities0 = topology->entity_types(0);
-    std::vector<dolfinx::mesh::CellType> entities1 = topology->entity_types(1);
-    std::vector<dolfinx::mesh::CellType> entities2 = topology->entity_types(2);
-
-    const std::shared_ptr<const dolfinx::common::IndexMap> topo0_im = topology->index_map(0);
-    const std::shared_ptr<const dolfinx::common::IndexMap> topo2_im = topology->index_map(2);
-
-    // Need to compute the sizes correctly, by excluding the ghosts
-    const std::size_t Nindices = mesh_input_global_indices.size();
-    const std::size_t Nx = _mesh_x.size();
+    // const std::shared_ptr<const dolfinx::common::IndexMap> topo0_im = topology->index_map(0);
+    const std::shared_ptr<const dolfinx::common::IndexMap> topo_imap = topology->index_map(mesh_dim);
+    const std::int64_t num_cells_global = topo_imap->size_global();
+    const std::int32_t num_cells_local = topo_imap->size_local();
+    const std::int64_t cell_offset = topo_imap->local_range()[0];
 
     adios2::Variable<std::string> name = io.DefineVariable<std::string>("name");
     adios2::Variable<std::int16_t> dim = io.DefineVariable<std::int16_t>("dim");
+    adios2::Variable<std::int64_t> n_nodes = io.DefineVariable<std::int64_t>("n_nodes");
+    adios2::Variable<std::int64_t> n_cells = io.DefineVariable<std::int64_t>("n_cells");
     adios2::Variable<std::int64_t> input_global_indices = io.DefineVariable<std::int64_t>("input_global_indices",
-                                                                                          {size * Nindices},
-                                                                                          {rank * Nindices},
-                                                                                          {Nindices},
+                                                                                          {num_nodes_global},
+                                                                                          {offset},
+                                                                                          {num_nodes_local},
                                                                                           adios2::ConstantDims);
-    adios2::Variable<std::float_t> x = io.DefineVariable<std::float_t>("x", 
-                                                                       {size * Nx},
-                                                                       {rank * Nx},
-                                                                       {Nx}, adios2::ConstantDims);
+
+    adios2::Variable<T> x = io.DefineVariable<T>("x", 
+                                                 {num_nodes_global, 3},
+                                                 {offset, 0},
+                                                 {num_nodes_local, 3},
+                                                 adios2::ConstantDims);
+
+    // adios2::Variable<std::int64_t> original_cell_indices = io.DefineVariable<std::int64_t>("original_cell_indices",
+    //                                                                                       {num_cells_global},
+    //                                                                                       {cell_offset},
+    //                                                                                       {num_cells_local},
+    //                                                                                       adios2::ConstantDims);
+
+    // WIP
+    auto connectivity = topology->connectivity(mesh_dim, 0);
+    // auto indices = connectivity->array();
+    const std::vector<int32_t> indices = connectivity->array();
+    const std::span<const int32_t> indices_span(indices.begin(),
+                                                indices.size());
+
+    // indices.end() is not 16 but a huge number!!
+
+    // int32_t temp = connectivity->offsets()[num_cells_local];
+    // const std::span<const int32_t> tempvec = indices_span.subspan(0, temp);
+    // const std::vector<std::int64_t> connectivity_nodes_global = graph::build::compute_local_to_global(
+    //                                                                  mesh_input_global_indices_span,
+    //                                                                  tempvec
+    //                                                                  );
 
     writer.BeginStep();
     writer.Put(name, mesh_name);
     writer.Put(dim, mesh_dim);
-    writer.Put(input_global_indices, mesh_input_global_indices.data());
-    // How to write PETScScalar?
-    // writer.Put(x, _mesh_x.data());
+    writer.Put(n_nodes, num_nodes_global);
+    writer.Put(n_cells, num_cells_global);
+    writer.Put(input_global_indices, mesh_input_global_indices_span.subspan(0, num_nodes_local).data());
+    writer.Put(x, mesh_x.subspan(0, num_nodes_local*3).data());
     writer.EndStep();
     writer.Close();
     }
@@ -117,13 +136,20 @@ int main(int argc, char* argv[])
 
     adios2::Variable<std::string> name = io.InquireVariable<std::string>("name");
     adios2::Variable<std::int16_t> dim = io.InquireVariable<std::int16_t>("dim");
+    adios2::Variable<std::int64_t> n_nodes = io.InquireVariable<std::int64_t>("n_nodes");
+    adios2::Variable<std::int64_t> n_cells = io.InquireVariable<std::int64_t>("n_cells");
 
     std::string mesh_name;
     std::int16_t mesh_dim;
+    std::int64_t num_nodes_global;
+    std::int64_t num_cells_global;
     reader.Get(name, mesh_name);
     reader.Get(dim, mesh_dim);
+    reader.Get(n_nodes, num_nodes_global);
+    reader.Get(n_cells, num_cells_global);
 
     adios2::Variable<int64_t> input_global_indices = io.InquireVariable<int64_t>("input_global_indices");
+    adios2::Variable<T> x = io.InquireVariable<T>("x");
 
     const std::size_t Nindices = 9;
     if (input_global_indices) // means not found

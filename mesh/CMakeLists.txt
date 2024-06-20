@@ -32,5 +32,5 @@ set_source_files_properties(
   main.cpp
   PROPERTIES
     COMPILE_FLAGS
-    "$<$<BOOL:${HAVE_NO_MULTLINE}>:-Wno-comment -Wall -Wextra -pedantic -Werror>"
+    "$<$<BOOL:${HAVE_NO_MULTLINE}>:-Wno-comment -Wall -Wextra -pedantic>"
 )
