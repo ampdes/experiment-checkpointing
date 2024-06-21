@@ -83,6 +83,20 @@ int main(int argc, char* argv[])
                                                  {num_nodes_local, 3},
                                                  adios2::ConstantDims);
 
+    // To get the true size of the global array,
+    // we can gather `indices_offsets[num_cells_local]`
+    adios2::Variable<std::int64_t> cell_indices = io.DefineVariable<std::int64_t>("cell_indices",
+                                                                                  {num_cells_global*4},
+                                                                                  {cell_offset*4},
+                                                                                  {num_cells_local*4},
+                                                                                  adios2::ConstantDims);
+
+    adios2::Variable<std::int32_t> cell_indices_offsets = io.DefineVariable<std::int32_t>("cell_indices_offsets",
+                                                                                  {num_cells_global+1},
+                                                                                  {cell_offset},
+                                                                                  {num_cells_local+1},
+                                                                                  adios2::ConstantDims);
+
     // adios2::Variable<std::int64_t> original_cell_indices = io.DefineVariable<std::int64_t>("original_cell_indices",
     //                                                                                       {num_cells_global},
     //                                                                                       {cell_offset},
@@ -92,11 +106,21 @@ int main(int argc, char* argv[])
     // WIP
     auto connectivity = topology->connectivity(mesh_dim, 0);
     // auto indices = connectivity->array();
-    const std::vector<int32_t> indices = connectivity->array();
+    std::vector<int32_t> indices = connectivity->array();
     const std::span<const int32_t> indices_span(indices.begin(),
                                                 indices.size());
-
     // indices.end() is not 16 but a huge number!!
+    std::vector<int32_t> indices_offsets = connectivity->offsets();
+    const std::span<const int32_t> indices_offsets_span(indices_offsets.begin(),
+                                                indices_offsets.size());
+
+    std::vector<std::int64_t> connectivity_nodes_global(indices_offsets[num_cells_local]);
+    std::iota(connectivity_nodes_global.begin(), connectivity_nodes_global.end(), 0);
+
+    for (std::size_t i = 0; i < connectivity_nodes_global.size(); ++i)
+    {
+        connectivity_nodes_global[i] = mesh_input_global_indices[indices[i]];
+    }
 
     // int32_t temp = connectivity->offsets()[num_cells_local];
     // const std::span<const int32_t> tempvec = indices_span.subspan(0, temp);
@@ -105,6 +129,7 @@ int main(int argc, char* argv[])
     //                                                                  tempvec
     //                                                                  );
 
+    // auto offspan = indices_offsets_span.subspan(0, num_cells_local+1);
     writer.BeginStep();
     writer.Put(name, mesh_name);
     writer.Put(dim, mesh_dim);
@@ -112,6 +137,8 @@ int main(int argc, char* argv[])
     writer.Put(n_cells, num_cells_global);
     writer.Put(input_global_indices, mesh_input_global_indices_span.subspan(0, num_nodes_local).data());
     writer.Put(x, mesh_x.subspan(0, num_nodes_local*3).data());
+    writer.Put(cell_indices, connectivity_nodes_global.data());
+    writer.Put(cell_indices_offsets, indices_offsets_span.subspan(0, num_cells_local+1).data());
     writer.EndStep();
     writer.Close();
     }
