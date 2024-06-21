@@ -18,11 +18,11 @@ int main(int argc, char* argv[])
   dolfinx::init_logging(argc, argv);
   PetscInitialize(&argc, &argv, nullptr, nullptr);
 
-  {
-    int i=0;
-    while (i == 0)
-      sleep(5);
-  }
+//   {
+//     int i=0;
+//     while (i == 0)
+//       sleep(5);
+//   }
 
   {
     // Create mesh and function space
@@ -115,12 +115,14 @@ int main(int argc, char* argv[])
                                                 indices_offsets.size());
 
     std::vector<std::int64_t> connectivity_nodes_global(indices_offsets[num_cells_local]);
-    std::iota(connectivity_nodes_global.begin(), connectivity_nodes_global.end(), 0);
 
-    for (std::size_t i = 0; i < connectivity_nodes_global.size(); ++i)
-    {
-        connectivity_nodes_global[i] = mesh_input_global_indices[indices[i]];
-    }
+    imap->local_to_global(indices_span.subspan(0, indices_offsets[num_cells_local]), connectivity_nodes_global);
+    // std::iota(connectivity_nodes_global.begin(), connectivity_nodes_global.end(), 0);
+
+    // for (std::size_t i = 0; i < connectivity_nodes_global.size(); ++i)
+    // {
+    //     connectivity_nodes_global[i] = mesh_input_global_indices[indices[i]];
+    // }
 
     // int32_t temp = connectivity->offsets()[num_cells_local];
     // const std::span<const int32_t> tempvec = indices_span.subspan(0, temp);
@@ -129,7 +131,10 @@ int main(int argc, char* argv[])
     //                                                                  tempvec
     //                                                                  );
 
-    // auto offspan = indices_offsets_span.subspan(0, num_cells_local+1);
+    // TODO:
+    // In general, can't multiply cell_local_range*num_dofs_per_cell to get the offset,
+    // Have to know in general the start of the offset
+
     writer.BeginStep();
     writer.Put(name, mesh_name);
     writer.Put(dim, mesh_dim);
