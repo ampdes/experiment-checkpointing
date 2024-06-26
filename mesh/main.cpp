@@ -67,6 +67,10 @@ int main(int argc, char* argv[])
     const std::int32_t num_cells_local = topo_imap->size_local();
     const std::int64_t cell_offset = topo_imap->local_range()[0];
 
+    auto cmap = mesh->geometry().cmap();
+    auto geom_layout = cmap.create_dof_layout();
+    int num_dofs_per_cell = geom_layout.num_entity_closure_dofs(mesh_dim);
+    
     adios2::Variable<std::string> name = io.DefineVariable<std::string>("name");
     adios2::Variable<std::int16_t> dim = io.DefineVariable<std::int16_t>("dim");
     adios2::Variable<std::int64_t> n_nodes = io.DefineVariable<std::int64_t>("n_nodes");
@@ -86,9 +90,9 @@ int main(int argc, char* argv[])
     // To get the true size of the global array,
     // we can gather `indices_offsets[num_cells_local]`
     adios2::Variable<std::int64_t> cell_indices = io.DefineVariable<std::int64_t>("cell_indices",
-                                                                                  {num_cells_global*4},
-                                                                                  {cell_offset*4},
-                                                                                  {num_cells_local*4},
+                                                                                  {num_cells_global*num_dofs_per_cell},
+                                                                                  {cell_offset*num_dofs_per_cell},
+                                                                                  {num_cells_local*num_dofs_per_cell},
                                                                                   adios2::ConstantDims);
 
     adios2::Variable<std::int32_t> cell_indices_offsets = io.DefineVariable<std::int32_t>("cell_indices_offsets",
@@ -105,31 +109,24 @@ int main(int argc, char* argv[])
 
     // WIP
     auto connectivity = topology->connectivity(mesh_dim, 0);
-    // auto indices = connectivity->array();
-    std::vector<int32_t> indices = connectivity->array();
+    // std::vector<int32_t> indices = connectivity->array();
+    auto indices = connectivity->array();
     const std::span<const int32_t> indices_span(indices.begin(),
-                                                indices.size());
-    // indices.end() is not 16 but a huge number!!
-    std::vector<int32_t> indices_offsets = connectivity->offsets();
+                                                indices.end());
+
+    // std::vector<int> indices_offsets = connectivity->offsets();
+    auto indices_offsets = connectivity->offsets();
+    for (std::size_t i = 0; i < indices_offsets.size(); ++i)
+    {
+        indices_offsets[i] += cell_offset*4;
+    }
+
     const std::span<const int32_t> indices_offsets_span(indices_offsets.begin(),
-                                                indices_offsets.size());
+                                                        indices_offsets.end());
 
     std::vector<std::int64_t> connectivity_nodes_global(indices_offsets[num_cells_local]);
 
     imap->local_to_global(indices_span.subspan(0, indices_offsets[num_cells_local]), connectivity_nodes_global);
-    // std::iota(connectivity_nodes_global.begin(), connectivity_nodes_global.end(), 0);
-
-    // for (std::size_t i = 0; i < connectivity_nodes_global.size(); ++i)
-    // {
-    //     connectivity_nodes_global[i] = mesh_input_global_indices[indices[i]];
-    // }
-
-    // int32_t temp = connectivity->offsets()[num_cells_local];
-    // const std::span<const int32_t> tempvec = indices_span.subspan(0, temp);
-    // const std::vector<std::int64_t> connectivity_nodes_global = graph::build::compute_local_to_global(
-    //                                                                  mesh_input_global_indices_span,
-    //                                                                  tempvec
-    //                                                                  );
 
     // TODO:
     // In general, can't multiply cell_local_range*num_dofs_per_cell to get the offset,
