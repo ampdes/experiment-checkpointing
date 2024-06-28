@@ -11,6 +11,13 @@ using namespace dolfinx;
 using T = PetscScalar;
 using U = typename dolfinx::scalar_value_type_t<T>;
 
+// TODO:Basix function add: need enum to int function in basix
+// #include <basix.h>
+// std::map<basix::element::lagrange_variant, int> lagrange_variants {
+//                       {basix::element::lagrange_variant::unset,0},
+//                       {basix::element::lagrange_variant::equispaced,1},
+//                       {basix::element::lagrange_variant::gll_warped,2},
+//                     };
 
 int main(int argc, char* argv[])
 {
@@ -67,20 +74,27 @@ int main(int argc, char* argv[])
     const std::int64_t cell_offset = topo_imap->local_range()[0];
 
     auto cmap = mesh->geometry().cmap();
+    auto edegree = cmap.degree();
+    auto ecelltype = cmap.cell_shape();
+    auto elagrange_variant = cmap.variant();
     auto geom_layout = cmap.create_dof_layout();
     int num_dofs_per_cell = geom_layout.num_entity_closure_dofs(mesh_dim);
     
     adios2::Variable<std::string> name = io.DefineVariable<std::string>("name");
     adios2::Variable<std::int16_t> dim = io.DefineVariable<std::int16_t>("dim");
+    adios2::Variable<std::string> celltype = io.DefineVariable<std::string>("CellType");
+    adios2::Variable<std::int32_t> degree = io.DefineVariable<std::int32_t>("Degree");
+    adios2::Variable<std::int32_t> variant = io.DefineVariable<std::int32_t>("Variant");
     adios2::Variable<std::int64_t> n_nodes = io.DefineVariable<std::int64_t>("n_nodes");
     adios2::Variable<std::int64_t> n_cells = io.DefineVariable<std::int64_t>("n_cells");
+    adios2::Variable<std::int32_t> n_dofs_per_cell = io.DefineVariable<std::int32_t>("n_dofs_per_cell");
     adios2::Variable<std::int64_t> input_global_indices = io.DefineVariable<std::int64_t>("input_global_indices",
                                                                                           {num_nodes_global},
                                                                                           {offset},
                                                                                           {num_nodes_local},
                                                                                           adios2::ConstantDims);
 
-    adios2::Variable<T> x = io.DefineVariable<T>("x", 
+    adios2::Variable<T> x = io.DefineVariable<T>("Points",
                                                  {num_nodes_global, 3},
                                                  {offset, 0},
                                                  {num_nodes_local, 3},
@@ -106,7 +120,6 @@ int main(int argc, char* argv[])
     //                                                                                       {num_cells_local},
     //                                                                                       adios2::ConstantDims);
 
-    // WIP
     auto connectivity = topology->connectivity(mesh_dim, 0);
     // std::vector<int32_t> indices = connectivity->array();
     auto indices = connectivity->array();
@@ -117,7 +130,7 @@ int main(int argc, char* argv[])
     auto indices_offsets = connectivity->offsets();
     for (std::size_t i = 0; i < indices_offsets.size(); ++i)
     {
-        indices_offsets[i] += cell_offset*4;
+        indices_offsets[i] += cell_offset*num_dofs_per_cell;
     }
 
     const std::span<const int32_t> indices_offsets_span(indices_offsets.begin(),
@@ -134,8 +147,13 @@ int main(int argc, char* argv[])
     writer.BeginStep();
     writer.Put(name, mesh_name);
     writer.Put(dim, mesh_dim);
+    writer.Put(celltype, mesh::to_string(ecelltype));
+    writer.Put(degree, edegree);
+    // writer.Put(variant, lagrange_variants[elagrange_variant]);
+    writer.Put(variant, 2);
     writer.Put(n_nodes, num_nodes_global);
     writer.Put(n_cells, num_cells_global);
+    writer.Put(n_dofs_per_cell, num_dofs_per_cell);
     writer.Put(input_global_indices, mesh_input_global_indices_span.subspan(0, num_nodes_local).data());
     writer.Put(x, mesh_x.subspan(0, num_nodes_local*3).data());
     writer.Put(cell_indices, connectivity_nodes_global.data());
