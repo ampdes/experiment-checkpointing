@@ -24,14 +24,6 @@ int main(int argc, char* argv[])
 //   }
 
   {
-    // Create mesh and function space
-    auto part = mesh::create_cell_partitioner(mesh::GhostMode::shared_facet);
-    auto mesh = std::make_shared<mesh::Mesh<U>>(
-        mesh::create_rectangle<U>(MPI_COMM_WORLD, {{{0.0, 0.0}, {1.0, 1.0}}},
-                                  {2, 2}, mesh::CellType::quadrilateral, part));
-
-    const mesh::Geometry<U>& geometry = mesh->geometry();
-    auto topology = mesh->topology();
 
     // ADIOS2
     const std::string fname("mesh");
@@ -40,109 +32,6 @@ int main(int argc, char* argv[])
     int rank, size;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
-
-    // Write
-    {
-    adios2::IO io = adios.DeclareIO(fname + "-write");
-    adios2::Engine writer = io.Open(fname + ".bp", adios2::Mode::Write);
-
-    const std::string mesh_name = mesh->name;
-    const std::int16_t mesh_dim = geometry.dim();
-    const std::vector<int64_t> mesh_input_global_indices = geometry.input_global_indices();
-    const std::span<const int64_t> mesh_input_global_indices_span(mesh_input_global_indices.begin(),
-                                                            mesh_input_global_indices.end());
-    const std::span<const T> mesh_x = geometry.x();
-
-    auto imap = mesh->geometry().index_map();
-    const std::int64_t num_nodes_global = imap->size_global();
-    const std::int32_t num_nodes_local = imap->size_local();
-    const std::int64_t offset = imap->local_range()[0];
-
-    auto dmap = mesh->geometry().dofmap();
-
-    // const std::shared_ptr<const dolfinx::common::IndexMap> topo0_im = topology->index_map(0);
-    const std::shared_ptr<const dolfinx::common::IndexMap> topo_imap = topology->index_map(mesh_dim);
-    const std::int64_t num_cells_global = topo_imap->size_global();
-    const std::int32_t num_cells_local = topo_imap->size_local();
-    const std::int64_t cell_offset = topo_imap->local_range()[0];
-
-    auto cmap = mesh->geometry().cmap();
-    auto geom_layout = cmap.create_dof_layout();
-    int num_dofs_per_cell = geom_layout.num_entity_closure_dofs(mesh_dim);
-    
-    adios2::Variable<std::string> name = io.DefineVariable<std::string>("name");
-    adios2::Variable<std::int16_t> dim = io.DefineVariable<std::int16_t>("dim");
-    adios2::Variable<std::int64_t> n_nodes = io.DefineVariable<std::int64_t>("n_nodes");
-    adios2::Variable<std::int64_t> n_cells = io.DefineVariable<std::int64_t>("n_cells");
-    adios2::Variable<std::int64_t> input_global_indices = io.DefineVariable<std::int64_t>("input_global_indices",
-                                                                                          {num_nodes_global},
-                                                                                          {offset},
-                                                                                          {num_nodes_local},
-                                                                                          adios2::ConstantDims);
-
-    adios2::Variable<T> x = io.DefineVariable<T>("x", 
-                                                 {num_nodes_global, 3},
-                                                 {offset, 0},
-                                                 {num_nodes_local, 3},
-                                                 adios2::ConstantDims);
-
-    // To get the true size of the global array,
-    // we can gather `indices_offsets[num_cells_local]`
-    adios2::Variable<std::int64_t> cell_indices = io.DefineVariable<std::int64_t>("cell_indices",
-                                                                                  {num_cells_global*num_dofs_per_cell},
-                                                                                  {cell_offset*num_dofs_per_cell},
-                                                                                  {num_cells_local*num_dofs_per_cell},
-                                                                                  adios2::ConstantDims);
-
-    adios2::Variable<std::int32_t> cell_indices_offsets = io.DefineVariable<std::int32_t>("cell_indices_offsets",
-                                                                                  {num_cells_global+1},
-                                                                                  {cell_offset},
-                                                                                  {num_cells_local+1},
-                                                                                  adios2::ConstantDims);
-
-    // adios2::Variable<std::int64_t> original_cell_indices = io.DefineVariable<std::int64_t>("original_cell_indices",
-    //                                                                                       {num_cells_global},
-    //                                                                                       {cell_offset},
-    //                                                                                       {num_cells_local},
-    //                                                                                       adios2::ConstantDims);
-
-    // WIP
-    auto connectivity = topology->connectivity(mesh_dim, 0);
-    // std::vector<int32_t> indices = connectivity->array();
-    auto indices = connectivity->array();
-    const std::span<const int32_t> indices_span(indices.begin(),
-                                                indices.end());
-
-    // std::vector<int> indices_offsets = connectivity->offsets();
-    auto indices_offsets = connectivity->offsets();
-    for (std::size_t i = 0; i < indices_offsets.size(); ++i)
-    {
-        indices_offsets[i] += cell_offset*4;
-    }
-
-    const std::span<const int32_t> indices_offsets_span(indices_offsets.begin(),
-                                                        indices_offsets.end());
-
-    std::vector<std::int64_t> connectivity_nodes_global(indices_offsets[num_cells_local]);
-
-    imap->local_to_global(indices_span.subspan(0, indices_offsets[num_cells_local]), connectivity_nodes_global);
-
-    // TODO:
-    // In general, can't multiply cell_local_range*num_dofs_per_cell to get the offset,
-    // Have to know in general the start of the offset
-
-    writer.BeginStep();
-    writer.Put(name, mesh_name);
-    writer.Put(dim, mesh_dim);
-    writer.Put(n_nodes, num_nodes_global);
-    writer.Put(n_cells, num_cells_global);
-    writer.Put(input_global_indices, mesh_input_global_indices_span.subspan(0, num_nodes_local).data());
-    writer.Put(x, mesh_x.subspan(0, num_nodes_local*3).data());
-    writer.Put(cell_indices, connectivity_nodes_global.data());
-    writer.Put(cell_indices_offsets, indices_offsets_span.subspan(0, num_cells_local+1).data());
-    writer.EndStep();
-    writer.Close();
-    }
 
     // Read
     {
@@ -164,46 +53,75 @@ int main(int argc, char* argv[])
 
     adios2::Variable<std::string> name = io.InquireVariable<std::string>("name");
     adios2::Variable<std::int16_t> dim = io.InquireVariable<std::int16_t>("dim");
+    adios2::Variable<std::string> celltype = io.InquireVariable<std::string>("CellType");
+    adios2::Variable<std::int32_t> degree = io.InquireVariable<std::int32_t>("Degree");
+    adios2::Variable<std::int32_t> variant = io.InquireVariable<std::int32_t>("Variant");
     adios2::Variable<std::int64_t> n_nodes = io.InquireVariable<std::int64_t>("n_nodes");
     adios2::Variable<std::int64_t> n_cells = io.InquireVariable<std::int64_t>("n_cells");
+    adios2::Variable<std::int32_t> n_dofs_per_cell = io.InquireVariable<std::int32_t>("n_dofs_per_cell");
     adios2::Variable<int64_t> input_global_indices = io.InquireVariable<int64_t>("input_global_indices");
-    adios2::Variable<T> x = io.InquireVariable<T>("x");
+    adios2::Variable<T> x = io.InquireVariable<T>("Points");
     adios2::Variable<int64_t> cell_indices = io.InquireVariable<int64_t>("cell_indices");
     adios2::Variable<int32_t> cell_indices_offsets = io.InquireVariable<int32_t>("cell_indices_offsets");
 
     std::string mesh_name;
     std::int16_t mesh_dim;
+    std::string ecelltype;
+    std::int32_t edegree;
+    std::int32_t evariant;
     std::int64_t num_nodes_global;
     std::int64_t num_cells_global;
+    std::int32_t num_dofs_per_cell;
     reader.Get(name, mesh_name);
     reader.Get(dim, mesh_dim);
+    reader.Get(celltype, ecelltype);
+    reader.Get(degree, edegree);
+    reader.Get(variant, evariant);
     reader.Get(n_nodes, num_nodes_global);
     reader.Get(n_cells, num_cells_global);
+    reader.Get(n_dofs_per_cell, num_dofs_per_cell);
 
+    std::array<std::int64_t, 2> local_range = dolfinx::MPI::local_range(rank, num_nodes_global, size);
+    int num_nodes_local = local_range[1] - local_range[0];
 
-    const std::size_t Nindices = 9;
-    if (input_global_indices) // means not found
+    std::array<std::int64_t, 2> cell_range = dolfinx::MPI::local_range(rank, num_cells_global, size);
+    int num_cells_local = cell_range[1] - cell_range[0];
+
+    std::vector<int64_t> mesh_input_global_indices;
+    std::vector<T> mesh_x;
+    std::vector<int64_t> topo_indices;
+    std::vector<int32_t> topo_indices_offsets;
+
+    if (input_global_indices)
     {
-        std::vector<int64_t> mesh_input_global_indices;
-        // read only the chunk corresponding to our rank
-        input_global_indices.SetSelection({{Nindices * rank}, {Nindices}});
-
+        input_global_indices.SetSelection({{local_range[0]}, {num_nodes_local}});
         reader.Get(input_global_indices, mesh_input_global_indices, adios2::Mode::Sync);
-
-        if (rank == 0)
-        {
-            std::cout << "input_global_indices: \n";
-            for (const auto number : mesh_input_global_indices)
-            {
-                std::cout << number << " ";
-            }
-            std::cout << "\n";
-        }
     }
+
+    if (x)
+    {
+        x.SetSelection({{local_range[0],0}, {num_nodes_local,3}});
+        reader.Get(x, mesh_x, adios2::Mode::Sync);
+    }
+
+    if (cell_indices)
+    {
+        cell_indices.SetSelection({{cell_range[0]*num_dofs_per_cell}, {cell_range[1]*num_dofs_per_cell}});
+        reader.Get(cell_indices, topo_indices, adios2::Mode::Sync);
+    }
+
+    if (cell_indices_offsets)
+    {
+        cell_indices_offsets.SetSelection({{cell_range[0]}, {cell_range[1]}});
+        reader.Get(cell_indices_offsets, topo_indices_offsets, adios2::Mode::Sync);
+    }
+
     reader.EndStep();
     reader.Close();
     std::cout << mesh_name << "\n";
     std::cout << "Mesh dimensions: " << mesh_dim << "\n";
     }
   }
+
+  // TODO: Construct mesh following https://github.com/FEniCS/dolfinx/blob/main/cpp/demo/mixed_topology/main.cpp
 }
