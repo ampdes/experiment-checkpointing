@@ -23,8 +23,6 @@ int main(int argc, char* argv[])
 //       sleep(5);
 //   }
 
-  {
-
     // ADIOS2
     const std::string fname("mesh");
     adios2::ADIOS adios(MPI_COMM_WORLD);
@@ -34,7 +32,6 @@ int main(int argc, char* argv[])
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
     // Read
-    {
     adios2::IO io = adios.DeclareIO(fname + "-read");
     adios2::Engine reader = io.Open(fname + ".bp", adios2::Mode::Read);
 
@@ -112,16 +109,59 @@ int main(int argc, char* argv[])
 
     if (cell_indices_offsets)
     {
-        cell_indices_offsets.SetSelection({{cell_range[0]}, {cell_range[1]}});
+        cell_indices_offsets.SetSelection({{cell_range[0]}, {cell_range[1]+1}});
         reader.Get(cell_indices_offsets, topo_indices_offsets, adios2::Mode::Sync);
     }
+
+    std::int32_t cell_offset = topo_indices_offsets[0];
+    for (int i = 0; i < topo_indices_offsets.size(); ++i)
+        topo_indices_offsets[i] -= cell_offset;
 
     reader.EndStep();
     reader.Close();
     std::cout << mesh_name << "\n";
     std::cout << "Mesh dimensions: " << mesh_dim << "\n";
-    }
-  }
 
-  // TODO: Construct mesh following https://github.com/FEniCS/dolfinx/blob/main/cpp/demo/mixed_topology/main.cpp
+    // WIP: Construct mesh following https://github.com/FEniCS/dolfinx/blob/main/cpp/demo/mixed_topology/main.cpp
+    graph::AdjacencyList<std::int64_t> cells_list(topo_indices, topo_indices_offsets);
+    std::vector<std::int64_t> original_global_index(num_nodes_local);
+    std::iota(original_global_index.begin(), original_global_index.end(), 0);
+    std::vector<int> ghost_owners;
+    std::vector<std::int64_t> boundary_vertices;
+
+    mesh::CellType cell_type{mesh::to_type(ecelltype)};
+    fem::CoordinateElement<double> element = fem::CoordinateElement<double>(cell_type, edegree);
+
+    auto topo = std::make_shared<mesh::Topology>(mesh::create_topology(
+            MPI_COMM_WORLD, topo_indices, original_global_index, ghost_owners,
+            cell_type, boundary_vertices));
+
+    auto topo_cells = topo->connectivity(2, 0);
+
+    std::cout << "cells\n------\n";
+    for (int i = 0; i < topo_cells->num_nodes(); ++i)
+        {
+        std::cout << i << " [";
+        for (auto q : topo_cells->links(i))
+            std::cout << q << " ";
+        std::cout << "]\n";
+        }
+
+    topo->create_connectivity(1, 0);
+
+    std::cout << "facets\n------\n";
+    auto topo_facets = topo->connectivity(1, 0);
+    for (int i = 0; i < topo_facets->num_nodes(); ++i)
+        {
+        std::cout << i << " [";
+        for (auto q : topo_facets->links(i))
+            std::cout << q << " ";
+        std::cout << "]\n";
+        }
+
+    // mesh::Geometry geometry = mesh::create_geometry(MPI_COMM_WORLD, *topo, element,
+    //                                                 mesh_input_global_indices, topo_indices, mesh_x, mesh_dim);
+
+    // mesh::Mesh<double> mesh(MPI_COMM_WORLD, topo, geometry);
+
 }
