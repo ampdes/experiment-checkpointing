@@ -22,6 +22,7 @@ using U = typename dolfinx::scalar_value_type_t<T>;
 int main(int argc, char* argv[])
 {
   dolfinx::init_logging(argc, argv);
+  // MPI_Init(&argc, &argv);
   PetscInitialize(&argc, &argv, nullptr, nullptr);
 
 //   {
@@ -35,7 +36,7 @@ int main(int argc, char* argv[])
     auto part = mesh::create_cell_partitioner(mesh::GhostMode::shared_facet);
     auto mesh = std::make_shared<mesh::Mesh<U>>(
         mesh::create_rectangle<U>(MPI_COMM_WORLD, {{{0.0, 0.0}, {1.0, 1.0}}},
-                                  {2, 2}, mesh::CellType::quadrilateral, part));
+                                  {4, 4}, mesh::CellType::quadrilateral, part));
 
     const mesh::Geometry<U>& geometry = mesh->geometry();
     auto topology = mesh->topology();
@@ -162,4 +163,9 @@ int main(int argc, char* argv[])
     writer.Close();
     }
   }
+
+  // MPI_Finalize();
+  PetscFinalize();
+
+  return 0;
 }
