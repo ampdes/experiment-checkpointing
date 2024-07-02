@@ -4,6 +4,7 @@
 #include <dolfinx/fem/petsc.h>
 #include <unistd.h>
 #include <mpi.h>
+#include <basix/finite-element.h>
 
 #include <adios2.h>
 
@@ -11,13 +12,6 @@ using namespace dolfinx;
 using T = PetscScalar;
 using U = typename dolfinx::scalar_value_type_t<T>;
 
-// TODO:Basix function add: need enum to int function in basix
-// #include <basix.h>
-// std::map<basix::element::lagrange_variant, int> lagrange_variants {
-//                       {basix::element::lagrange_variant::unset,0},
-//                       {basix::element::lagrange_variant::equispaced,1},
-//                       {basix::element::lagrange_variant::gll_warped,2},
-//                     };
 
 int main(int argc, char* argv[])
 {
@@ -36,7 +30,7 @@ int main(int argc, char* argv[])
     auto part = mesh::create_cell_partitioner(mesh::GhostMode::shared_facet);
     auto mesh = std::make_shared<mesh::Mesh<U>>(
         mesh::create_rectangle<U>(MPI_COMM_WORLD, {{{0.0, 0.0}, {1.0, 1.0}}},
-                                  {4, 4}, mesh::CellType::quadrilateral, part));
+                                  {2, 2}, mesh::CellType::quadrilateral, part));
 
     const mesh::Geometry<U>& geometry = mesh->geometry();
     auto topology = mesh->topology();
@@ -85,7 +79,7 @@ int main(int argc, char* argv[])
     adios2::Variable<std::int16_t> dim = io.DefineVariable<std::int16_t>("dim");
     adios2::Variable<std::string> celltype = io.DefineVariable<std::string>("CellType");
     adios2::Variable<std::int32_t> degree = io.DefineVariable<std::int32_t>("Degree");
-    adios2::Variable<std::int32_t> variant = io.DefineVariable<std::int32_t>("Variant");
+    adios2::Variable<std::string> variant = io.DefineVariable<std::string>("Variant");
     adios2::Variable<std::int64_t> n_nodes = io.DefineVariable<std::int64_t>("n_nodes");
     adios2::Variable<std::int64_t> n_cells = io.DefineVariable<std::int64_t>("n_cells");
     adios2::Variable<std::int32_t> n_dofs_per_cell = io.DefineVariable<std::int32_t>("n_dofs_per_cell");
@@ -151,7 +145,8 @@ int main(int argc, char* argv[])
     writer.Put(celltype, mesh::to_string(ecelltype));
     writer.Put(degree, edegree);
     // writer.Put(variant, lagrange_variants[elagrange_variant]);
-    writer.Put(variant, 2);
+    writer.Put(variant, basix::element::to_string(elagrange_variant));
+    // writer.Put(variant, 2);
     writer.Put(n_nodes, num_nodes_global);
     writer.Put(n_cells, num_cells_global);
     writer.Put(n_dofs_per_cell, num_dofs_per_cell);
