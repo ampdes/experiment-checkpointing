@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <mpi.h>
 
+#include <bits/stdc++.h>
 #include <adios2.h>
 
 using namespace dolfinx;
@@ -56,7 +57,7 @@ int main(int argc, char* argv[])
     adios2::Variable<std::int16_t> dim = io.InquireVariable<std::int16_t>("dim");
     adios2::Variable<std::string> celltype = io.InquireVariable<std::string>("CellType");
     adios2::Variable<std::int32_t> degree = io.InquireVariable<std::int32_t>("Degree");
-    adios2::Variable<std::int32_t> variant = io.InquireVariable<std::int32_t>("Variant");
+    adios2::Variable<std::string> variant = io.InquireVariable<std::string>("Variant");
     adios2::Variable<std::int64_t> n_nodes = io.InquireVariable<std::int64_t>("n_nodes");
     adios2::Variable<std::int64_t> n_cells = io.InquireVariable<std::int64_t>("n_cells");
     adios2::Variable<std::int32_t> n_dofs_per_cell = io.InquireVariable<std::int32_t>("n_dofs_per_cell");
@@ -69,7 +70,7 @@ int main(int argc, char* argv[])
     std::int16_t mesh_dim;
     std::string ecelltype;
     std::int32_t edegree;
-    std::int32_t evariant;
+    std::string evariant;
     std::int64_t num_nodes_global;
     std::int64_t num_cells_global;
     std::int32_t num_dofs_per_cell;
@@ -170,13 +171,18 @@ int main(int argc, char* argv[])
             }
     }
 
-    // auto geometry = std::make_shared<mesh::Geometry>(mesh::create_geometry(MPI_COMM_WORLD, *topo, element,
-    //                                                 mesh_input_global_indices, topo_indices, mesh_x, mesh_dim));
+    std::vector<T> mesh_x_reduced(num_nodes_local*mesh_dim);
+    for (int i = 0; i < num_nodes_local; ++i)
+    {
+        for (int j = 0; j < mesh_dim; ++j)
+        mesh_x_reduced[i*mesh_dim + j] = mesh_x[i*3 + j];
+    }
 
-    // mesh::Geometry geometry = mesh::create_geometry(MPI_COMM_WORLD, *topo, element,
-    //                                                 mesh_input_global_indices, topo_indices, mesh_x, mesh_dim);
+    std::sort(mesh_input_global_indices.begin(), mesh_input_global_indices.end());
+    mesh::Geometry geometry = mesh::create_geometry(*topo, element,
+                                                    mesh_input_global_indices, topo_indices, mesh_x_reduced, mesh_dim);
 
-    // mesh::Mesh<double> mesh(MPI_COMM_WORLD, topo, geometry);
+    mesh::Mesh<double> mesh(MPI_COMM_WORLD, topo, geometry);
 
 //   MPI_Finalize();
   PetscFinalize();
