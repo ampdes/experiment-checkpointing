@@ -7,9 +7,16 @@
 #include <dolfinx/fem/petsc.h>
 #include <unistd.h>
 #include <mpi.h>
+#include <basix/finite-element.h>
 
 #include <bits/stdc++.h>
 #include <adios2.h>
+
+std::map<std::string, basix::element::lagrange_variant> lagrange_variants {
+                      {"unset", basix::element::lagrange_variant::unset},
+                      {"equispaced", basix::element::lagrange_variant::equispaced},
+                      {"gll_warped", basix::element::lagrange_variant::gll_warped},
+                    };
 
 using namespace dolfinx;
 using T = PetscScalar;
@@ -147,7 +154,8 @@ int main(int argc, char* argv[])
     std::vector<std::int64_t> boundary_vertices;
 
     mesh::CellType cell_type{mesh::to_type(ecelltype)};
-    fem::CoordinateElement<double> element = fem::CoordinateElement<double>(cell_type, edegree);
+    fem::CoordinateElement<double> element = fem::CoordinateElement<double>(cell_type, edegree,
+                                                                            lagrange_variants[evariant]);
 
     auto topo = std::make_shared<mesh::Topology>(mesh::create_topology(
             MPI_COMM_WORLD, topo_indices, original_global_index, ghost_owners,
