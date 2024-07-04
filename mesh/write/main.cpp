@@ -8,6 +8,13 @@
 
 #include <adios2.h>
 
+
+std::map<basix::element::lagrange_variant, std::string> lagrange_variants {
+                      {basix::element::lagrange_variant::unset, "unset"},
+                      {basix::element::lagrange_variant::equispaced, "equispaced"},
+                      {basix::element::lagrange_variant::gll_warped, "gll_warped"},
+                    };
+
 using namespace dolfinx;
 using T = PetscScalar;
 using U = typename dolfinx::scalar_value_type_t<T>;
@@ -75,14 +82,16 @@ int main(int argc, char* argv[])
     auto geom_layout = cmap.create_dof_layout();
     int num_dofs_per_cell = geom_layout.num_entity_closure_dofs(mesh_dim);
     
-    adios2::Variable<std::string> name = io.DefineVariable<std::string>("name");
-    adios2::Variable<std::int16_t> dim = io.DefineVariable<std::int16_t>("dim");
-    adios2::Variable<std::string> celltype = io.DefineVariable<std::string>("CellType");
-    adios2::Variable<std::int32_t> degree = io.DefineVariable<std::int32_t>("Degree");
-    adios2::Variable<std::string> variant = io.DefineVariable<std::string>("Variant");
+    io.DefineAttribute<std::string>("name", mesh_name);
+    io.DefineAttribute<std::int16_t>("dim", mesh_dim);
+    io.DefineAttribute<std::string>("CellType", mesh::to_string(cmap.cell_shape()));
+    io.DefineAttribute<std::int32_t>("Degree", cmap.degree());
+    io.DefineAttribute<std::string>("LagrangeVariant", lagrange_variants[elagrange_variant]);
+
     adios2::Variable<std::int64_t> n_nodes = io.DefineVariable<std::int64_t>("n_nodes");
     adios2::Variable<std::int64_t> n_cells = io.DefineVariable<std::int64_t>("n_cells");
     adios2::Variable<std::int32_t> n_dofs_per_cell = io.DefineVariable<std::int32_t>("n_dofs_per_cell");
+
     adios2::Variable<std::int64_t> input_global_indices = io.DefineVariable<std::int64_t>("input_global_indices",
                                                                                           {num_nodes_global},
                                                                                           {offset},
@@ -140,13 +149,6 @@ int main(int argc, char* argv[])
     // Have to know in general the start of the offset
 
     writer.BeginStep();
-    writer.Put(name, mesh_name);
-    writer.Put(dim, mesh_dim);
-    writer.Put(celltype, mesh::to_string(ecelltype));
-    writer.Put(degree, edegree);
-    // writer.Put(variant, lagrange_variants[elagrange_variant]);
-    writer.Put(variant, basix::element::to_string(elagrange_variant));
-    // writer.Put(variant, 2);
     writer.Put(n_nodes, num_nodes_global);
     writer.Put(n_cells, num_cells_global);
     writer.Put(n_dofs_per_cell, num_dofs_per_cell);
