@@ -42,6 +42,19 @@ int main(int argc, char* argv[])
 
     reader.BeginStep();
 
+    const auto attributes = io.AvailableAttributes();
+
+    for (const auto &attributepair : attributes)
+    {
+    std::cout << "Attribute: " << attributepair.first;
+    for (const auto &attributepair : attributepair.second)
+    {
+        std::cout << "\tKey: " << attributepair.first << "\tValue: " << attributepair.second
+                    << "\n";
+    }
+    std::cout << "\n";
+    }
+
     const std::map<std::string, adios2::Params> variables = io.AvailableVariables();
     for (const auto &variablePair : variables)
     {
@@ -53,11 +66,17 @@ int main(int argc, char* argv[])
         }
     }
 
-    adios2::Variable<std::string> name = io.InquireVariable<std::string>("name");
-    adios2::Variable<std::int16_t> dim = io.InquireVariable<std::int16_t>("dim");
-    adios2::Variable<std::string> celltype = io.InquireVariable<std::string>("CellType");
-    adios2::Variable<std::int32_t> degree = io.InquireVariable<std::int32_t>("Degree");
-    adios2::Variable<std::string> variant = io.InquireVariable<std::string>("Variant");
+    adios2::Attribute<std::string> name = io.InquireAttribute<std::string>("name");
+    adios2::Attribute<std::int16_t> dim = io.InquireAttribute<std::int16_t>("dim");
+    adios2::Attribute<std::string> celltype = io.InquireAttribute<std::string>("CellType");
+    adios2::Attribute<std::int32_t> degree = io.InquireAttribute<std::int32_t>("Degree");
+    adios2::Attribute<std::string> variant = io.InquireAttribute<std::string>("LagrangeVariant");
+
+    // adios2::Variable<std::string> name = io.InquireVariable<std::string>("name");
+    // adios2::Variable<std::int16_t> dim = io.InquireVariable<std::int16_t>("dim");
+    // adios2::Variable<std::string> celltype = io.InquireVariable<std::string>("CellType");
+    // adios2::Variable<std::int32_t> degree = io.InquireVariable<std::int32_t>("Degree");
+    // adios2::Variable<std::string> variant = io.InquireVariable<std::string>("LagrangeVariant");
     adios2::Variable<std::int64_t> n_nodes = io.InquireVariable<std::int64_t>("n_nodes");
     adios2::Variable<std::int64_t> n_cells = io.InquireVariable<std::int64_t>("n_cells");
     adios2::Variable<std::int32_t> n_dofs_per_cell = io.InquireVariable<std::int32_t>("n_dofs_per_cell");
@@ -66,19 +85,26 @@ int main(int argc, char* argv[])
     adios2::Variable<int64_t> cell_indices = io.InquireVariable<int64_t>("cell_indices");
     adios2::Variable<int32_t> cell_indices_offsets = io.InquireVariable<int32_t>("cell_indices_offsets");
 
-    std::string mesh_name;
-    std::int16_t mesh_dim;
-    std::string ecelltype;
-    std::int32_t edegree;
-    std::string evariant;
+    // std::string mesh_name;
+    // std::int16_t mesh_dim;
+    // std::string ecelltype;
+    // std::int32_t edegree;
+    // std::string evariant;
+
+    std::string mesh_name = name.Data()[0];
+    std::int16_t mesh_dim = dim.Data()[0];
+    std::string ecelltype = celltype.Data()[0];
+    std::int32_t edegree = degree.Data()[0];
+    std::string evariant = variant.Data()[0];
+
     std::int64_t num_nodes_global;
     std::int64_t num_cells_global;
     std::int32_t num_dofs_per_cell;
-    reader.Get(name, mesh_name);
-    reader.Get(dim, mesh_dim);
-    reader.Get(celltype, ecelltype);
-    reader.Get(degree, edegree);
-    reader.Get(variant, evariant);
+    // reader.Get(name, mesh_name);
+    // reader.Get(dim, mesh_dim);
+    // reader.Get(celltype, ecelltype);
+    // reader.Get(degree, edegree);
+    // reader.Get(variant, evariant);
     reader.Get(n_nodes, num_nodes_global);
     reader.Get(n_cells, num_cells_global);
     reader.Get(n_dofs_per_cell, num_dofs_per_cell);
@@ -125,6 +151,7 @@ int main(int argc, char* argv[])
 
     reader.EndStep();
     reader.Close();
+
     std::cout << mesh_name << "\n";
     std::cout << "Mesh dimensions: " << mesh_dim << "\n";
 
