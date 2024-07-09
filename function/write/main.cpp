@@ -133,14 +133,13 @@ int main(int argc, char* argv[])
   auto num_dofs_local_dmap = num_cells_local * num_dofs_per_cell_v * dofmap_bs;
   auto index_map_bs = dofmap->index_map_bs();
 
-  std::vector<std::int32_t> dofs;
-  dofs.reserve(dmap.extent(0) * dmap.extent(1));
-  for (std::size_t i = 0; i < dmap.extent(0); ++i)
-    for (std::size_t j = 0; j < dmap.extent(1); ++j)
-      dofs.push_back(dmap(i, j));
-  for (auto ss : dofs)
-    std::cout << ss << " ";
-
+  // std::vector<std::int32_t> dofs;
+  // dofs.reserve(dmap.extent(0) * dmap.extent(1));
+  // for (std::size_t i = 0; i < dmap.extent(0); ++i)
+  //   for (std::size_t j = 0; j < dmap.extent(1); ++j)
+  //     dofs.push_back(dmap(i, j));
+  // for (auto ss : dofs)
+  //   std::cout << ss << " ";
 
   std::vector<std::int32_t> dofs;
   dofs.reserve(num_dofs_local_dmap);
@@ -148,7 +147,7 @@ int main(int argc, char* argv[])
   // Use int16?
   std::vector<std::int32_t> rems;
   rems.reserve(num_dofs_local_dmap);
-  int ind, temp;
+  int temp;
 
   for (std::size_t i = 0; i < num_cells_local; ++i)
     for (std::size_t j = 0; j < num_dofs_per_cell_v; ++j)
@@ -160,9 +159,11 @@ int main(int argc, char* argv[])
   for (auto ss : dofs)
     std::cout << ss << " ";
 
-  auto local_imap = dolfinx::common::IndexMap(mesh->comm, num_dofs_local_dmap);
-
   auto dofmap_imap = dofmap.index_map();
+  std::uint32_t dofmap_offset = dofmap_imap.local_range()[0];
+  std::uint32_t num_dofmap_size = dofmap_imap.size_global();
+
+  auto local_imap = dolfinx::common::IndexMap(mesh->comm, num_dofs_local_dmap);
   std::vector<std::int64_t> dofs_global(num_dofs_local_dmap);
 
   dofmap_imap->local_to_global(dofs, dofs_global);
@@ -170,7 +171,7 @@ int main(int argc, char* argv[])
     dofs_global[i] = dofs_global[i] * index_map_bs + rems[i];
 
   // Compute dofmap offsets
-  auto dofmap_offset = local_imap.local_range()[0];
+  std::uint32_t dofmap_offset = local_imap.local_range()[0];
   std::vector<std::int64_t> local_dofmap_offsets(num_cells_local + 1);
   for (std::size_t i = 0; i < num_dofs_local_dmap; ++i)
     local_dofmap_offsets[i] = i * num_dofs_per_cell * dofmap_bs + dofmap_offset;
@@ -230,12 +231,24 @@ int main(int argc, char* argv[])
                                                                          {num_cells_local},
                                                                          adios2::ConstantDims);
 
+  adios2::Variable<std::int32_t> dofmapvar = io.DefineVariable<std::int32_t>(funcname + "_dofmap",
+                                                                             {num_dofmap_size},
+                                                                             {dofmap_offset},
+                                                                             {num_dofs_local_dmap},
+                                                                             adios2::ConstantDims);
+
+  adios2::Variable<std::int32_t> xdofmap_var = io.DefineVariable<std::int32_t>(funcname + "_XDofmap",
+                                                                              {num_cells_global+1},
+                                                                              {cell_offset},
+                                                                              {num_cells_local+1},
+                                                                              adios2::ConstantDims);
+
   // WIP
-  // adios2::Variable<std::int32_t> dofmapvar = io.DefineVariable<std::int32_t>(funcname + "_dofmap",
-  //                                                                            {num_dofs_global},
-  //                                                                            {cell_offset},
-  //                                                                            {num_cells_local+1},
-  //                                                                            adios2::ConstantDims);
+  adios2::Variable<T> x = io.DefineVariable<T>(funcname + "_values",
+                                                {num_dofs_global},
+                                                {offset, 0},
+                                                {num_nodes_local, 3},
+                                                adios2::ConstantDims);
 
 
   writer.BeginStep();
