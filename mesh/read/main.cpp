@@ -165,26 +165,26 @@ int main(int argc, char* argv[])
 
     topo->create_connectivity(1, 0);
 
-    if (rank == 0){
-        std::cout << "cells\n------\n";
-        for (int i = 0; i < topo_cells->num_nodes(); ++i)
-            {
-            std::cout << i << " [";
-            for (auto q : topo_cells->links(i))
-                std::cout << q << " ";
-            std::cout << "]\n";
-            }
+    // if (rank == 0){
+    //     std::cout << "cells\n------\n";
+    //     for (int i = 0; i < topo_cells->num_nodes(); ++i)
+    //         {
+    //         std::cout << i << " [";
+    //         for (auto q : topo_cells->links(i))
+    //             std::cout << q << " ";
+    //         std::cout << "]\n";
+    //         }
 
-        std::cout << "facets\n------\n";
-        auto topo_facets = topo->connectivity(1, 0);
-        for (int i = 0; i < topo_facets->num_nodes(); ++i)
-            {
-            std::cout << i << " [";
-            for (auto q : topo_facets->links(i))
-                std::cout << q << " ";
-            std::cout << "]\n";
-            }
-    }
+    //     std::cout << "facets\n------\n";
+    //     auto topo_facets = topo->connectivity(1, 0);
+    //     for (int i = 0; i < topo_facets->num_nodes(); ++i)
+    //         {
+    //         std::cout << i << " [";
+    //         for (auto q : topo_facets->links(i))
+    //             std::cout << q << " ";
+    //         std::cout << "]\n";
+    //         }
+    // }
 
     std::vector<T> mesh_x_reduced(num_nodes_local*mesh_dim);
     for (int i = 0; i < num_nodes_local; ++i)
@@ -194,10 +194,15 @@ int main(int argc, char* argv[])
     }
 
     std::sort(mesh_input_global_indices.begin(), mesh_input_global_indices.end());
-    mesh::Geometry geometry = mesh::create_geometry(*topo, element,
-                                                    mesh_input_global_indices, topo_indices, mesh_x_reduced, mesh_dim);
 
-    mesh::Mesh<double> mesh(MPI_COMM_WORLD, topo, geometry);
+    std::cout << mesh_input_global_indices.size() << " ";
+    std::cout << topo_indices.size() << " ";
+    std::cout << mesh_x_reduced.size() << " ";
+
+    // mesh::Geometry geometry = mesh::create_geometry(*topo, element,
+    //                                                 mesh_input_global_indices, topo_indices, mesh_x_reduced, mesh_dim);
+
+    // mesh::Mesh<double> mesh(MPI_COMM_WORLD, topo, geometry);
 
 //   MPI_Finalize();
   PetscFinalize();
