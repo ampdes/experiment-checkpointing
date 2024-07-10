@@ -157,13 +157,13 @@ int main(int argc, char* argv[])
     fem::CoordinateElement<double> element = fem::CoordinateElement<double>(cell_type, edegree,
                                                                             lagrange_variants[evariant]);
 
-    auto topo = std::make_shared<mesh::Topology>(mesh::create_topology(
-            MPI_COMM_WORLD, topo_indices, original_global_index, ghost_owners,
-            cell_type, boundary_vertices));
+    // auto topo = std::make_shared<mesh::Topology>(mesh::create_topology(
+    //         MPI_COMM_WORLD, topo_indices, original_global_index, ghost_owners,
+    //         cell_type, boundary_vertices));
 
-    auto topo_cells = topo->connectivity(2, 0);
+    // auto topo_cells = topo->connectivity(2, 0);
 
-    topo->create_connectivity(1, 0);
+    // topo->create_connectivity(1, 0);
 
     // if (rank == 0){
     //     std::cout << "cells\n------\n";
@@ -186,23 +186,36 @@ int main(int argc, char* argv[])
     //         }
     // }
 
-    std::vector<T> mesh_x_reduced(num_nodes_local*mesh_dim);
-    for (int i = 0; i < num_nodes_local; ++i)
-    {
-        for (int j = 0; j < mesh_dim; ++j)
-        mesh_x_reduced[i*mesh_dim + j] = mesh_x[i*3 + j];
-    }
+    // std::vector<T> mesh_x_reduced(num_nodes_local*mesh_dim);
+    // for (int i = 0; i < num_nodes_local; ++i)
+    // {
+    //     for (int j = 0; j < mesh_dim; ++j)
+    //     mesh_x_reduced[i*mesh_dim + j] = mesh_x[i*3 + j];
+    // }
 
-    std::sort(mesh_input_global_indices.begin(), mesh_input_global_indices.end());
+    // std::sort(mesh_input_global_indices.begin(), mesh_input_global_indices.end());
 
-    std::cout << mesh_input_global_indices.size() << " ";
-    std::cout << topo_indices.size() << " ";
-    std::cout << mesh_x_reduced.size() << " ";
+    // std::cout << mesh_input_global_indices.size() << " ";
+    // std::cout << topo_indices.size() << " ";
+    // std::cout << mesh_x_reduced.size() << " ";
 
     // mesh::Geometry geometry = mesh::create_geometry(*topo, element,
     //                                                 mesh_input_global_indices, topo_indices, mesh_x_reduced, mesh_dim);
 
     // mesh::Mesh<double> mesh(MPI_COMM_WORLD, topo, geometry);
+
+    std::array<std::size_t, 2> xshape;
+    xshape[0] = num_nodes_local;
+    xshape[1] = 3;
+    auto part = mesh::create_cell_partitioner(mesh::GhostMode::shared_facet);
+    
+    MPI_Comm comm = MPI_COMM_WORLD;
+    mesh::Mesh<double> mesh = mesh::create_mesh(
+        comm, comm, topo_indices,
+        element,
+        comm, mesh_x, xshape,
+        part);
+
 
 //   MPI_Finalize();
   PetscFinalize();
