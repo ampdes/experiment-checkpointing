@@ -96,9 +96,9 @@ int main(int argc, char* argv[])
   std::uint64_t cell_offset = topo_imap->local_range()[0];
 
   auto cmap = mesh->geometry().cmap();
-  auto edegree = cmap.degree();
-  auto ecelltype = cmap.cell_shape();
-  auto elagrange_variant = cmap.variant();
+  // auto edegree = cmap.degree();
+  // auto ecelltype = cmap.cell_shape();
+  // auto elagrange_variant = cmap.variant();
   auto geom_layout = cmap.create_dof_layout();
   std::uint32_t num_dofs_per_cell = geom_layout.num_entity_closure_dofs(mesh_dim);
 
@@ -123,13 +123,22 @@ int main(int argc, char* argv[])
 
 
   // function data
-  std::string funcname = func->name();
+  std::string funcname = func->name;
   auto dofmap = func->function_space()->dofmap();
   auto values = func->x()->array();
 
+  // const std::span<T> values_span(values.begin(),
+  //                                values.end());
+
+  topology->create_entity_permutations();
+  auto cell_perm = topology->get_cell_permutation_info();
+  const std::span<const uint32_t> cell_perm_span(cell_perm.begin(),
+                                                cell_perm.end());
+
+  // Convert local dofmap into global_dofmap
   auto dmap = dofmap->map();
-  auto dofmap_bs = dofmap->bs();
   auto num_dofs_per_cell_v = dmap.extent(1);
+  std::uint32_t dofmap_bs = dofmap->bs();
   auto num_dofs_local_dmap = num_cells_local * num_dofs_per_cell_v * dofmap_bs;
   auto index_map_bs = dofmap->index_map_bs();
 
@@ -152,32 +161,35 @@ int main(int argc, char* argv[])
   for (std::size_t i = 0; i < num_cells_local; ++i)
     for (std::size_t j = 0; j < num_dofs_per_cell_v; ++j)
       for (std::size_t k = 0; k < dofmap_bs; ++k)
+      {
         temp = dmap(i, j) * dofmap_bs + k;
         dofs.push_back(std::floor(temp/index_map_bs));
         rems.push_back(temp % index_map_bs);
+      }
 
   for (auto ss : dofs)
     std::cout << ss << " ";
 
-  auto dofmap_imap = dofmap.index_map();
-  std::uint32_t dofmap_offset = dofmap_imap.local_range()[0];
-  std::uint32_t num_dofmap_size = dofmap_imap.size_global();
-
-  auto local_imap = dolfinx::common::IndexMap(mesh->comm, num_dofs_local_dmap);
   std::vector<std::int64_t> dofs_global(num_dofs_local_dmap);
-
-  dofmap_imap->local_to_global(dofs, dofs_global);
+  // auto dofmap_imap = dofmap.index_map();
+  dofmap->index_map->local_to_global(dofs, dofs_global);
   for (std::size_t i = 0; i < num_dofs_local_dmap; ++i)
+  {
     dofs_global[i] = dofs_global[i] * index_map_bs + rems[i];
+  }
 
   // Compute dofmap offsets
-  std::uint32_t dofmap_offset = local_imap.local_range()[0];
+  auto dofmap_imap = dolfinx::common::IndexMap(mesh->comm(), num_dofs_local_dmap);
+  std::uint32_t dofmap_offset = dofmap_imap.local_range()[0];
   std::vector<std::int64_t> local_dofmap_offsets(num_cells_local + 1);
-  for (std::size_t i = 0; i < num_dofs_local_dmap; ++i)
+  for (std::size_t i = 0; i < num_cells_local + 1; ++i)
     local_dofmap_offsets[i] = i * num_dofs_per_cell * dofmap_bs + dofmap_offset;
 
-  std::uint64_t num_dofs_global = local_imap.size_global() * index_map_bs;
-  auto num_dofs_local = (local_imap.local_range()[1] - local_imap.local_range()[0]) * index_map_bs;
+  std::uint64_t num_dofs_global = dofmap->index_map->size_global() * index_map_bs;
+  std::uint32_t num_dofs_local = (dofmap->index_map->local_range()[1]
+                                  - dofmap->index_map->local_range()[0]) * index_map_bs;
+  std::uint32_t dof_offset = dofmap->index_map->local_range()[0] * index_map_bs;
+  std::uint64_t num_dofs_global_dmap = dofmap_imap.size_global();
 
   //
   adios2::IO io = adios.DeclareIO(fname + "-write");
@@ -187,7 +199,7 @@ int main(int argc, char* argv[])
   io.DefineAttribute<std::int16_t>("dim", mesh_dim);
   io.DefineAttribute<std::string>("CellType", mesh::to_string(cmap.cell_shape()));
   io.DefineAttribute<std::int32_t>("Degree", cmap.degree());
-  io.DefineAttribute<std::string>("LagrangeVariant", lagrange_variants[elagrange_variant]);
+  io.DefineAttribute<std::string>("LagrangeVariant", lagrange_variants[cmap.variant()]);
 
   adios2::Variable<std::uint64_t> n_nodes = io.DefineVariable<std::uint64_t>("n_nodes");
   adios2::Variable<std::uint64_t> n_cells = io.DefineVariable<std::uint64_t>("n_cells");
@@ -225,33 +237,33 @@ int main(int argc, char* argv[])
   //                                                                                       {num_cells_local},
   //                                                                                       adios2::ConstantDims);
 
-  adios2::Variable<std::int32_t> pvar = io.DefineVariable<std::int32_t>("CellPermutations",
+  adios2::Variable<std::uint32_t> pvar = io.DefineVariable<std::uint32_t>("CellPermutations",
                                                                          {num_cells_global},
                                                                          {cell_offset},
                                                                          {num_cells_local},
                                                                          adios2::ConstantDims);
 
-  adios2::Variable<std::int32_t> dofmapvar = io.DefineVariable<std::int32_t>(funcname + "_dofmap",
-                                                                             {num_dofmap_size},
+  adios2::Variable<std::int64_t> dofmapvar = io.DefineVariable<std::int64_t>(funcname + "_dofmap",
+                                                                             {num_dofs_global_dmap},
                                                                              {dofmap_offset},
                                                                              {num_dofs_local_dmap},
                                                                              adios2::ConstantDims);
 
-  adios2::Variable<std::int32_t> xdofmap_var = io.DefineVariable<std::int32_t>(funcname + "_XDofmap",
+  adios2::Variable<std::int64_t> xdofmapvar = io.DefineVariable<std::int64_t>(funcname + "_XDofmap",
                                                                               {num_cells_global+1},
                                                                               {cell_offset},
                                                                               {num_cells_local+1},
                                                                               adios2::ConstantDims);
 
-  // WIP
-  adios2::Variable<T> x = io.DefineVariable<T>(funcname + "_values",
-                                                {num_dofs_global},
-                                                {offset, 0},
-                                                {num_nodes_local, 3},
-                                                adios2::ConstantDims);
+  adios2::Variable<T> valvar = io.DefineVariable<T>(funcname + "_values",
+                                               {num_dofs_global},
+                                               {dof_offset},
+                                               {num_dofs_local},
+                                               adios2::ConstantDims);
 
 
   writer.BeginStep();
+  // Put mesh data
   writer.Put(n_nodes, num_nodes_global);
   writer.Put(n_cells, num_cells_global);
   writer.Put(n_dofs_per_cell, num_dofs_per_cell);
@@ -259,6 +271,11 @@ int main(int argc, char* argv[])
   writer.Put(x, mesh_x.subspan(0, num_nodes_local*3).data());
   writer.Put(cell_indices, connectivity_nodes_global.data());
   writer.Put(cell_indices_offsets, indices_offsets_span.subspan(0, num_cells_local+1).data());
+  // Put function data
+  writer.Put(pvar, cell_perm_span.subspan(0, num_cells_local+1).data());
+  writer.Put(dofmapvar, dofs_global.data());
+  writer.Put(xdofmapvar, local_dofmap_offsets.data());
+  writer.Put(valvar, values.data());
   writer.EndStep();
   writer.Close();
 
