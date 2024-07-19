@@ -145,6 +145,11 @@ int main(int argc, char *argv[]) {
 
   io.DefineAttribute<std::string>("name_meshtags", meshtags->name);
 
+  adios2::Variable<std::uint64_t> n_tag_entities_global
+      = io.DefineVariable<std::uint64_t>("num_tag_entities_global");
+  adios2::Variable<std::uint32_t> n_dofs_per_entity
+      = io.DefineVariable<std::uint32_t>("num_dofs_per_entity");
+
   adios2::Variable<std::int64_t> topology_var =
       io.DefineVariable<std::int64_t>(name + "_topology",
                                       {num_tag_entities_global, num_dofs_per_entity},
@@ -162,6 +167,8 @@ int main(int argc, char *argv[]) {
 
   writer.BeginStep();
   // meshtags
+  writer.Put(n_dofs_per_entity, num_dofs_per_entity);
+  writer.Put(n_tag_entities_global, num_tag_entities_global);
   writer.Put(topology_var, gindices.data());
   writer.Put(values_var, local_values.subspan(0, num_saved_tag_entities).data());
 
